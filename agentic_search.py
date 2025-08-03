@@ -107,34 +107,34 @@ async def check_search_quality_async(query: str, document: str) -> int:
 
 
 def get_searching_budget(state: AgenticSearchState):
-    queries = state["queries"]
-    query_list = ""
-    for q in queries:
-        query_list += f"- {q}\n"
-    system_instruction = iteration_budget_instruction.format(query_list=query_list)
+    # queries = state["queries"]
+    # query_list = ""
+    # for q in queries:
+    #     query_list += f"- {q}\n"
+    # system_instruction = iteration_budget_instruction.format(query_list=query_list)
 
-    budget_value = None
-    retry = 0
-    while retry < 5 and budget_value is None:
-        result = call_llm(
-            MODEL_NAME,
-            BACKUP_MODEL_NAME,
-            prompt=[SystemMessage(content=system_instruction)]
-            + [
-                HumanMessage(
-                    content="Please give me the budget of searching iterations."
-                )
-            ],
-            tool=[searching_budget_formatter],
-            tool_choice="required",
-        )
-        try:
-            budget_value = result.tool_calls[0]["args"]["budget"]
-        except (IndexError, KeyError):
-            logger.warning(f"Failed to get budget from tool call")
-            retry += 1
-    logger.info(f"searching budget : {budget_value}")
-    return {"max_num_iterations": budget_value}
+    # budget_value = None
+    # retry = 0
+    # while retry < 5 and budget_value is None:
+    #     result = call_llm(
+    #         MODEL_NAME,
+    #         BACKUP_MODEL_NAME,
+    #         prompt=[SystemMessage(content=system_instruction)]
+    #         + [
+    #             HumanMessage(
+    #                 content="Please give me the budget of searching iterations."
+    #             )
+    #         ],
+    #         tool=[searching_budget_formatter],
+    #         tool_choice="required",
+    #     )
+    #     try:
+    #         budget_value = result.tool_calls[0]["args"]["budget"]
+    #     except (IndexError, KeyError):
+    #         logger.warning(f"Failed to get budget from tool call")
+    #         retry += 1
+    # logger.info(f"searching budget : {budget_value}")
+    return {"max_num_iterations": 1}
 
 
 def perform_web_search(state: AgenticSearchState):
@@ -194,7 +194,7 @@ def filter_and_format_results(state: AgenticSearchState):
         for query, result, score in [
             (tasks[i][0], tasks[i][1], scores[i]) for i in range(len(tasks))
         ]:
-            if score is not None and score > 2:
+            if score is not None and score >= 2:
                 result["score"] = score
                 results_by_query[query].append(result)
 
@@ -257,6 +257,9 @@ def aggregate_final_results(state: AgenticSearchState):
 def check_searching_results(state: AgenticSearchState):
     queries = state["queries"]
     source_str = state["source_str"]
+    if state["curr_num_iterations"] >= state["max_num_iterations"]:
+        return Command(goto=END)
+
     system_instruction = searching_results_grader.format(
         query=queries, context=source_str
     )
@@ -273,10 +276,7 @@ def check_searching_results(state: AgenticSearchState):
         tool_choice="required",
     )
     feedback = feedback.tool_calls[0]["args"]
-    if (
-        feedback["grade"] == "pass"
-        or state["curr_num_iterations"] >= state["max_num_iterations"]
-    ):
+    if feedback["grade"] == "pass":
         return Command(goto=END)
     else:
         return Command(

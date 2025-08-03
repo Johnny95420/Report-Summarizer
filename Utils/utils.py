@@ -283,7 +283,7 @@ def selenium_api_search(search_queries, include_raw_content: bool):
             params={
                 "query": query,
                 "include_raw_content": include_raw_content,
-                "max_results": 3,
+                "max_results": 5,
                 "timeout": 40,
             },
         )

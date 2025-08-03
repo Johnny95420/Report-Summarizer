@@ -369,6 +369,10 @@ def write_section(
         queries_history=queries_history,
     )
 
+    if state["search_iterations"] >= max_search_depth:
+        logger.info(f"Section:{section.name} reach search depth.")
+        # Publish the section to completed sections
+        return Command(update={"completed_sections": [section]}, goto=END)
     # Feedback
     logger.info(
         f"Start grade section content of topic:{section.name}, Search iteration:{state['search_iterations']}"
@@ -409,8 +413,8 @@ def write_section(
         )
         feedback = feedback.tool_calls[0]["args"]
 
-    if feedback["grade"] == "pass" or state["search_iterations"] >= max_search_depth:
-        logger.info(f"Section:{section.name} pass model check or reach search depth.")
+    if feedback["grade"] == "pass":
+        logger.info(f"Section:{section.name} pass model check.")
         # Publish the section to completed sections
         return Command(update={"completed_sections": [section]}, goto=END)
     else:
