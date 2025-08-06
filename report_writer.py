@@ -114,7 +114,7 @@ def search_relevance_doc(queries):
                 info.append(res)
             else:
                 expanded_content = track_expanded_context(
-                    res.metadata["content"], res.page_content, 5000, 2500
+                    res.metadata["content"], res.page_content, 1500, 1000
                 )
                 return_res = deepcopy(res)
                 return_res.metadata["content"] = expanded_content
@@ -471,14 +471,15 @@ def refine_sections(state: ReportState, config: RunnableConfig):
     configurable = config["configurable"]
     number_of_queries = configurable["number_of_queries"]
     sections = state["completed_sections"]
+    # use static full_context to avoid error cummulation and hit token cache
+    full_context = format_sections(sections)
     refined_sections = []
-
     for section in sections:
         if not section.research:
             refined_sections.append([section, None])
             continue
+
         # TODO: Refining in an orderly manner can help minimize content gaps, but it is somewhat inefficient. Is there a better approach?
-        full_context = format_sections(sections)
         system_instructions = refine_section_instructions.format(
             section_name=section.name,
             section_description=section.description,
@@ -493,17 +494,32 @@ def refine_sections(state: ReportState, config: RunnableConfig):
             [SystemMessage(content=system_instructions)]
             + [
                 HumanMessage(
-                    content="Refine the section based on the full report context."
+                    content="Refine the section based on the full report context.Remember to use the tool to format outputs."
                 )
             ],
             tool=[refine_section_formatter],
             tool_choice="required",
         )
-        refined_section_data = refined_output.tool_calls[0]["args"]
+        try:
+            refined_section_data = refined_output.tool_calls[0]["args"]
+        except (IndexError, KeyError):
+            refined_output = call_llm(
+                WRITER_MODEL_NAME,
+                BACKUP_WRITER_MODEL_NAME,
+                [SystemMessage(content=system_instructions)]
+                + [
+                    HumanMessage(
+                        content="Refine the section based on the full report context.Remember to use the tool to format outputs."
+                    )
+                ],
+                tool=[refine_section_formatter],
+                tool_choice="required",
+            )
+            refined_section_data = refined_output.tool_calls[0]["args"]
+
         section.description += "\n\n" + refined_section_data["refined_description"]
         section.content = refined_section_data["refined_content"]
         new_queries = refined_section_data["new_queries"]
-
         refined_sections.append([section, new_queries])
     return Command(
         update={
