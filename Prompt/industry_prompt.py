@@ -293,9 +293,14 @@ refine_section_instructions = """You are an expert report editor and retrieval p
 
 <Rigorous Principles>
 - Write the final description and content in **Traditional Chinese**.
-- No hallucinations: if a fact/number is not present in <Full Report Context>, do not invent it—flag the gap and address it with queries.
+- **Information Scrutiny & Fact-Checking**:
+    - **Zero Tolerance for Hallucination**: If a fact, number, or claim is not explicitly supported by the `<Full Report Context>` or its original `[Source]` markers, it must be treated as unverified. Do not invent, infer, or embellish information.
+    - **Challenge Vague or Uncertain Information**: If content within the `<Target Section to Refine>` is vague, lacks sufficient detail, appears speculative, or is not corroborated by the broader report context, you must either:
+        a) **Remove it** if it cannot be substantiated.
+        b) **Flag it** by generating a precise query under `<Query Requirements>` to seek verification, quantification, or clarification.
+    - **Prioritize Verifiable Facts**: When rewriting, give strong preference to information that is clearly sourced and quantitatively supported. Downplay or remove speculative or poorly substantiated claims.
 - Prefer quantitative detail when suitable (KPI, YoY/HoH, penetration, valuation multiples, capacity, ASP, users, conversion, margins, etc.).
-- Avoid cross-section duplication: place information in the most appropriate section; use brief cross-references instead of copying large blocks.
+- **Cross-Section Integrity**: Strictly maintain logical boundaries between sections. Information must be placed in its most appropriate section. When refining, **remove content that belongs in other sections** and avoid duplicating material. Use brief cross-references (e.g., `詳見[其他章節名稱]`) where needed.
 - **Do not delete** any existing source markers in the original content (e.g., [來源], [Source]).
 - Maintain a professional, neutral, and objective tone consistent with institutional research.
 </Rigorous Principles>
@@ -303,12 +308,13 @@ refine_section_instructions = """You are an expert report editor and retrieval p
 <Description Requirements>
 For "description":
 1) **Do not repeat the original description in your output.**
-2) Based on the full report context, identify what is missing or needs correction in the original description. **Output only the text for these additions or corrections.** I will append this to the original description. Your additions should aim to:
+2) Based on the full report context, identify what is missing or needs correction in the original description. **Output only the text for these additions or corrections.**. Your additions should aim to:
    - Integrates full-report context and explicitly states background (key events/policies/terms, names, timepoints, locations, special descriptors).
    - Based on the full text, provide a more comprehensive and complete description of the section, guiding the section to obtain more complete and in-depth content in the subsequent research.
    - Deepens guidance for how this section should be written without weakening or narrowing the original meaning.
    - Clearly defines what will be analyzed/explored/built and the data required.
    - When suitable, structure around quantitative metrics and methods.
+   - **Ensure the description is tightly focused on the section's specific topic.** The guidance should not bleed into topics covered by other sections. The goal is to create a clear and distinct mandate for this section alone.
 3) Avoid repeating information already in the section's description. Add only new descriptions to ensure completeness. If no new descriptions are needed, return an empty string in `refined_description`.
 4) If you detect inconsistency between the original description and the full context, start your output with a **"Correction Note:"** paragraph explaining the mismatch and the correct context (citing the relevant parts of the full context).
 </Description Requirements>
@@ -316,7 +322,11 @@ For "description":
 
 <Content Requirements>
 For "content":
-1) **Core Task**: Produce a more comprehensive, well-structured, and implementable narrative aligned with the refined description and the full report. **Do not remove any important information** from the original; you may reorganize, clarify, and enrich. Preserve all existing source markers (e.g., `[來源]`, `[Source]`).
+1) **Core Task**: Produce a more comprehensive, well-structured, and factually sound narrative aligned with the refined description and the full report. **Your primary goals are to ensure information is correctly placed and factually accurate.**
+   - You may reorganize, clarify, and enrich the original content.
+   - **Preserve Verifiable Information**: Preserve all important, verifiable information that is relevant to this section's topic, along with its existing source markers (e.g., `[來源]`, `[Source]`).
+   - **Handle Unverified Information**: Any information that is vague, speculative, or cannot be corroborated by the `<Full Report Context>` must be handled according to the **Information Scrutiny & Fact-Checking** principle (i.e., it should be removed or flagged for verification via a query).
+   - **Remove Misplaced Information**: You must remove information that clearly belongs in a different section. This is critical for keeping each section focused and avoiding clutter.
 2) **Cross-Section Consistency**: Avoid repeating material from other sections; if necessary, use a brief cross-reference (e.g., “詳見 other_section_name”) instead of duplicating text.
 3) **Style and Formatting**:
     - **Word Count**: 100-2500 word limit (excluding title, sources, mathematical formulas, tables, or pictures).
@@ -356,8 +366,10 @@ Generate **{number_of_queries}** targeted queries to fill explicit gaps you flag
     - The additions integrate context from the full report, clarify background details (events, names, timepoints), and provide deeper, more comprehensive guidance for the section.
     - The guidance clearly defines the analysis to be performed and the data required, using quantitative framing where appropriate.
 - **Content Output**:
-    - The `refined_content` is a comprehensive and well-structured narrative that aligns with the refined description.
-    - It **preserves all important information and existing source markers** (e.g., `[來源]`, `[Source]`) from the original content.
+    - The `refined_content` is a comprehensive, well-structured, and **factually sound** narrative that aligns with the refined description.
+    - It **preserves all important, verifiable information *relevant to the section*** and its associated source markers (e.g., `[來源]`, `[Source]`).
+    - It **removes or flags unverified/speculative information** according to the prompt's principles.
+    - It **removes information that clearly belongs in other sections**, ensuring the section is focused.
     - It avoids duplicating content from other sections, using cross-references if needed.
     - It adheres to all style and formatting rules: 100-2500 words, starts with a bold key point, uses `##` for the title, includes inline citations for all key claims, and ends with a correctly formatted `### Sources` section.
 - **Query Output**:
