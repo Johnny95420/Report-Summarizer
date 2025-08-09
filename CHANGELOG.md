@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-08-08
+
+### Added
+- Added final content refinement logic to `gather_complete_section` function in `report_writer.py` to ensure report consistency and integration.
+- Introduced `content_refinement_formatter` tool in `Tools/tools.py` for formatting refined content output.
+- Added `content_refinement_instructions` prompt template to both `Prompt/industry_prompt.py` and `Prompt/technical_research_prompt.py` for final content polishing.
+
+### Changed
+- Enhanced `gather_complete_section` function to perform content-only refinement based on full report context without modifying descriptions or generating new queries.
+- Updated imports in `report_writer.py` to include the new content refinement formatter.
+
 ## [0.2.0] - 2025-08-03
 
 ### Added

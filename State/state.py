@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 # %%
 def clearable_list_reducer(left: list | None, right: list | str | None) -> list:
+    if isinstance(right, list) and right[0] == "__CLEAR__":
+        left, right = None, right[1:]
     if right == "__CLEAR__":
         return []
     if left is None:

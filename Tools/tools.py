@@ -101,3 +101,15 @@ def refine_section_formatter(
         "refined_content": refined_content,
         "new_queries": new_queries,
     }
+
+
+@tool
+def content_refinement_formatter(refined_content: str):
+    """Summary
+    Take refined_content and convert them into suitable format for final content refinement
+    Args:
+        refined_content (str): The refined and improved content of the section based on full report context.
+    """
+    return {
+        "refined_content": refined_content,
+    }

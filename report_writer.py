@@ -30,7 +30,6 @@ DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
 
 
 from langchain_community.callbacks.infino_callback import get_num_tokens
-from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -59,6 +58,7 @@ from State.state import (
     SectionState,
 )
 from Tools.tools import (
+    content_refinement_formatter,
     feedback_formatter,
     queries_formatter,
     refine_section_formatter,
@@ -75,10 +75,10 @@ from Utils.utils import (
 )
 
 logger = logging.getLogger("AgentLogger")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.ERROR)
 
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
+console_handler.setLevel(logging.ERROR)
 
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
@@ -460,10 +460,50 @@ def should_refine(state: ReportState):
         return "gather_complete_section"
 
 
-def gather_complete_section(state: ReportState):
+def gather_complete_section(state: ReportState, config: RunnableConfig):
+    logger.info("===Gathering and refining completed sections===")
     completed_sections = state["completed_sections"]
-    completed_report_sections = format_sections(completed_sections)
-    return {"report_sections_from_research": completed_report_sections}
+    
+    # Use static full_context to refine content for consistency
+    full_context = format_sections(completed_sections)
+    refined_sections = []
+    
+    for section in completed_sections:
+        if section.research:  # Only refine research sections for content consistency
+            logger.info(f"Refining content for section: {section.name}")
+            
+            system_instructions = content_refinement_instructions.format(
+                section_name=section.name,
+                section_content=section.content,
+                full_context=full_context,
+            )
+            
+            try:
+                refined_output = call_llm(
+                    WRITER_MODEL_NAME,
+                    BACKUP_WRITER_MODEL_NAME,
+                    [SystemMessage(content=system_instructions)]
+                    + [
+                        HumanMessage(
+                            content="Refine the section content based on the full report context for consistency and integration. Use the tool to format outputs."
+                        )
+                    ],
+                    tool=[content_refinement_formatter],
+                    tool_choice="required",
+                )
+                
+                refined_content = refined_output.tool_calls[0]["args"]["refined_content"]
+                section.content = refined_content
+                
+            except (IndexError, KeyError) as e:
+                logger.error(f"Error refining section {section.name}: {e}")
+                # Keep original content if refinement fails
+                pass
+        
+        refined_sections.append(section)
+    
+    completed_report_sections = format_sections(refined_sections)
+    return {"report_sections_from_research": completed_report_sections, "completed_sections": refined_sections}
 
 
 def refine_sections(state: ReportState, config: RunnableConfig):
@@ -649,7 +689,3 @@ class ReportGraphBuilder:
             builder.add_edge("compile_final_report", END)
             self._graph = builder.compile(checkpointer=self.checkpointer)
         return self._graph
-
-
-report_graph_builder = ReportGraphBuilder()
-graph = report_graph_builder.get_graph()

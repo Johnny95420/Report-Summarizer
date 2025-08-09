@@ -220,3 +220,156 @@ For Conclusion/Summary:
 - For conclusion: 500–1000 word limit, ## for section title
 - Do not include word count or any preamble in your response
 </Quality Checks>"""
+
+refine_section_instructions = """You are an expert technical research editor and learning resource planner. Your task is to refine ONE specific section of a research/learning report by leveraging the FULL context of all other sections, then propose targeted search queries to deepen technical understanding and fill knowledge gaps.
+
+<Task>
+1) Rewrite the section's "description" and "content" using the full report context to enhance technical depth and learning value.
+2) Generate "queries" to obtain missing technical details, implementation examples, or theoretical foundations.
+</Task>
+
+<Rigorous Technical Principles>
+- Write the final description and content in **Traditional Chinese**.
+- **Technical Accuracy & Verification**:
+    - **Zero Tolerance for Technical Misinformation**: If a technical concept, algorithm, implementation detail, or research claim is not explicitly supported by the `<Full Report Context>` or its original `[Source]` markers, it must be treated as unverified. Do not invent, infer, or embellish technical information.
+    - **Challenge Incomplete Technical Information**: If content within the `<Target Section to Refine>` lacks technical depth, missing implementation details, appears theoretically incomplete, or is not corroborated by the broader report context, you must either:
+        a) **Remove it** if it cannot be substantiated with technical evidence.
+        b) **Flag it** by generating a precise query under `<Query Requirements>` to seek technical verification, implementation examples, or theoretical clarification.
+    - **Prioritize Implementable Knowledge**: When rewriting, give strong preference to information that includes concrete implementations, code examples, mathematical formulations, or empirical evidence. Downplay or remove purely conceptual claims without technical substance.
+- Prefer technical specificity when suitable (algorithms, architectures, performance metrics, benchmark results, implementation frameworks, etc.).
+- **Cross-Section Technical Integrity**: Strictly maintain logical boundaries between technical topics. Information must be placed in its most appropriate section based on technical context. When refining, **remove content that belongs in other technical sections** and avoid duplicating technical explanations. Use brief cross-references (e.g., `詳見[演算法實作章節]`) where needed.
+- **Preserve Technical References**: Do not delete any existing source markers, especially those referencing research papers, code repositories, or technical documentation (e.g., [arXiv:xxxx], [GitHub:xxx], [論文來源]).
+- Maintain a rigorous, objective, and educational tone consistent with technical research documentation.
+</Rigorous Technical Principles>
+
+<Description Requirements>
+For "description":
+1) **Do not repeat the original description in your output.**
+2) Based on the full report context, identify what technical aspects are missing or need enhancement in the original description. **Output only the text for these technical additions or corrections.** Your additions should aim to:
+   - Integrate full-report technical context and explicitly state technical background (key algorithms/frameworks/methodologies, version numbers, performance benchmarks, implementation requirements).
+   - Based on the full report, provide a more comprehensive technical roadmap for the section, guiding the section to obtain more complete implementation details and theoretical foundations.
+   - Deepen technical guidance for how this section should cover both theoretical understanding and practical implementation without weakening or narrowing the original learning objectives.
+   - Clearly define what technical skills will be developed, what implementations will be explored, and what specific technical resources are required.
+   - When suitable, structure around measurable learning outcomes, performance benchmarks, and implementation milestones.
+   - **Ensure the description is tightly focused on the section's specific technical domain.** The guidance should not bleed into topics covered by other technical sections. The goal is to create a clear and distinct technical learning mandate for this section alone.
+3) Avoid repeating information already in the section's description. Add only new technical guidance to ensure completeness. If no new technical aspects are needed, return an empty string in `refined_description`.
+4) If you detect inconsistency between the original description and the technical context from the full report, start your output with a **"Technical Correction Note:"** paragraph explaining the mismatch and the correct technical context (citing the relevant parts of the full report).
+</Description Requirements>
+
+<Content Requirements>
+For "content":
+1) **Core Technical Task**: Produce a more comprehensive, well-structured, and technically sound learning resource aligned with the refined description and the full report. **Your primary goals are to ensure technical information is correctly placed and implementable.**
+   - You may reorganize, clarify, and enrich the original technical content.
+   - **Preserve Implementable Information**: Preserve all important, verifiable technical information that is relevant to this section's learning objectives, along with its existing source markers (e.g., `[arXiv:xxxx]`, `[GitHub:xxx]`, `[技術文檔]`).
+   - **Handle Unverified Technical Claims**: Any technical information that is vague, speculative, or cannot be corroborated by the `<Full Report Context>` must be handled according to the **Technical Accuracy & Verification** principle (i.e., it should be removed or flagged for verification via a query).
+   - **Remove Misplaced Technical Content**: You must remove technical information that clearly belongs in a different section. This is critical for maintaining focused technical learning paths.
+2) **Cross-Section Technical Consistency**: Avoid repeating technical explanations from other sections; if necessary, use a brief technical cross-reference (e.g., "詳見演算法基礎章節") instead of duplicating technical content.
+3) **Technical Style and Formatting**:
+    - **Word Count**: 500-1000 word limit (excluding title, sources, mathematical formulas, tables, or diagrams).
+    - **Opening**: Start with **key takeaways or main technical insight** in bold.
+    - **Technical Focus**: Maintain a clear, logical, and structured manner suitable for research documentation or study notes. Focus on technical depth and practical learning insights.
+    - **Technical Elements**: Include mathematical formulas, code examples, or pseudocode where appropriate using proper formatting:
+      ```code
+      code content
+      ```
+    - **Title**: Use `##` for section title (Markdown format). If related to learning schedule, indicate time reference (e.g., "Day-3 深度學習基礎").
+    - **Structural Elements**: Only use structural elements IF they help clarify technical points:
+      * Either a focused table (using Markdown table syntax) for comparing algorithms, frameworks, or performance metrics.
+      * Or a list using proper Markdown list syntax (`*`, `-`, `1.`).
+    - **Technical Citations**: For any technical claims, algorithm descriptions, or implementation details, provide immediate inline citations (e.g., `[Paper Title]`, `[GitHub Repo]`). If synthesizing from multiple technical sources, cite all of them.
+    - **Sources Section**: End with `### Sources` that references technical materials, formatted as:
+      * List each source with title, date, and URL
+      * Format: `- Title `
+    - **Language**: Use **Traditional Chinese** for all technical writing.
+</Content Requirements>
+
+<Query Requirements>
+Generate **{number_of_queries}** targeted technical queries to fill explicit gaps you flagged in the content and to deepen technical understanding:
+1) Each query must map to a concrete missing technical detail, implementation need, or theoretical deepening you identified.
+2) Cover multiple technical angles as needed: algorithm implementations, performance benchmarks, research papers, technical specifications, framework documentation, code repositories, and practical examples (as applicable).
+3) Language rules:
+   - If the technical topic is **primarily covered in Chinese-language resources or Taiwan-specific implementations**, use **Traditional Chinese** queries.
+   - If the technical topic is **covered in international research, English documentation, or global open-source projects**, use **English** queries.
+4) Make queries highly retrievable for technical content: include specific technical terms, version numbers (e.g., "PyTorch 2.0", "TensorFlow"), repository names, paper identifiers (e.g., "arXiv:2301.xxxx"), and technical operators when useful (e.g., site:github.com, filetype:pdf, intitle:"implementation").
+5) No semantic duplicates; each query should address a different technical gap or implementation approach.
+6) Avoid leading technical conclusions; write search-ready strings for finding implementations, papers, or technical documentation rather than assuming results.
+</Query Requirements>
+
+<Quality Checks>
+- **Language**: The final `refined_description` and `refined_content` are written in Traditional Chinese.
+- **Description Output**:
+    - The `refined_description` output contains **only the technical additions or corrections**, not the full original description.
+    - The additions do not repeat technical information already present in the original description. If no new technical aspects can be added, the output is an empty string.
+    - If a technical inconsistency was found, the output starts with a **"Technical Correction Note:"** paragraph.
+    - The additions integrate technical context from the full report, clarify technical background details (algorithms, frameworks, versions), and provide deeper, more comprehensive technical guidance for the section.
+    - The technical guidance clearly defines the implementations to be explored, skills to be developed, and specific technical resources required, using measurable learning outcomes where appropriate.
+- **Content Output**:
+    - The `refined_content` is a comprehensive, well-structured, and **technically sound** learning resource that aligns with the refined description.
+    - It **preserves all important, implementable technical information *relevant to the section*** and its associated technical source markers (e.g., `[arXiv:xxxx]`, `[GitHub:xxx]`).
+    - It **removes or flags unverified/speculative technical information** according to the prompt's principles.
+    - It **removes technical content that clearly belongs in other sections**, ensuring the section maintains focused technical learning objectives.
+    - It avoids duplicating technical explanations from other sections, using technical cross-references if needed.
+    - It adheres to all technical style and formatting rules: 500-1000 words, starts with a bold technical insight, uses `##` for the title, includes proper technical formatting (code blocks, formulas), includes inline citations for all technical claims, and ends with a correctly formatted `### Sources` section.
+- **Query Output**:
+    - Exactly **{number_of_queries}** technical queries are generated.
+    - Each query is specific, targets a clearly identified technical gap in the content, and is designed to be highly retrievable for technical resources (using technical terms, version numbers, repository names, or paper identifiers where useful).
+    - Queries are non-overlapping (no semantic duplicates) and follow the specified language rules (Traditional Chinese for Chinese/Taiwan-specific topics, English for international technical resources).
+</Quality Checks>
+
+<Full Report Context>
+{full_context}
+</Full Report Context>
+
+<Target Section to Refine>
+- **Name:** {section_name}
+- **Original Description:** {section_description}
+- **Original Content:** {section_content}
+</Target Section to Refine>
+"""
+
+content_refinement_instructions = """You are an expert report editor performing FINAL CONTENT POLISHING in the last stage of report production. This is the ultimate quality assurance pass before report publication. Your task is to refine the content of ONE specific section to achieve institutional-grade consistency and integration with the complete report context.
+
+<Task>
+This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publication readiness by:
+1. **Ensuring absolute consistency with full report context** - align terminology, technical concepts, data points, cross-references, and narrative flow across all sections
+2. **Eliminating all inconsistencies and redundancies** - remove content duplication, resolve conflicting explanations, ensure logical coherence in technical explanations
+3. **Preserving and validating all factual accuracy** - maintain source citations, verify technical accuracy, remove unsubstantiated claims or outdated information
+4. **Achieving research documentation standards** - ensure clear technical communication, precise terminology, and rigorous analytical approach throughout
+5. **Optimizing readability and structure** - enhance logical flow, strengthen transitions between concepts, improve clarity without changing substance
+</Task>
+
+<Critical Final-Stage Principles>
+- Write the refined content in **Traditional Chinese**.
+- **FINAL STAGE ZERO TOLERANCE FOR HALLUCINATION**: This is the last opportunity to catch errors. Only use information explicitly supported by the original content and full report context. Absolutely no new facts, technical details, or claims may be added. Any unsupported information must be removed.
+- **Comprehensive Source and Reference Validation**: Maintain and verify all existing source markers, code references, paper citations, and technical references (e.g., [來源], [Source]) from the original content. Ensure all citations are properly formatted.
+- **Final Cross-Section Integrity Check**: This is your last chance to ensure proper section boundaries in technical content. Remove content that clearly belongs in other sections. Use brief cross-references where needed to maintain technical coherence.
+- **Publication-Ready Technical Standards**: Maintain objective, precise tone consistent with research documentation. Apply rigorous technical writing standards suitable for academic or professional publication.
+- **Final Format Validation**: Preserve the original section structure and formatting requirements:
+  - **Word Count**: 500-1000 word limit (excluding title, sources, mathematical formulas, tables, or diagrams)
+  - **Opening**: Ensure it starts with **key takeaways or main insight** in bold
+  - **Title**: Use `##` for section title (Markdown format)
+  - **Technical Elements**: Preserve code blocks, mathematical formulas, and technical diagrams
+  - **Structural Elements**: Only retain structural elements that genuinely clarify technical points (focused tables or proper Markdown lists)
+  - **Source Citations**: Verify proper citation format for technical papers, code repositories, and references
+  - **Sources Section**: Confirm it ends with properly formatted `### Sources` section
+</Critical Final-Stage Principles>
+
+<Final Quality Validation>
+Before completing, verify:
+1. **Technical Consistency Achieved**: All terminology, concepts, and technical explanations align perfectly with the full report context
+2. **Redundancies Eliminated**: No content duplication exists across sections, especially in technical explanations
+3. **Technical Integrity Maintained**: All information is technically accurate and supported by original content or full report context
+4. **Research Standards Met**: The content meets rigorous research documentation and technical writing standards
+5. **Format Requirements Satisfied**: All structural, technical formatting, and citation requirements are correctly implemented
+6. **Reference Integrity Preserved**: All original citations, code references, and technical sources are maintained and properly formatted
+</Final Quality Validation>
+
+<Full Report Context>
+{full_context}
+</Full Report Context>
+
+<Target Section to Refine>
+- **Name:** {section_name}
+- **Original Content:** {section_content}
+</Target Section to Refine>
+"""
