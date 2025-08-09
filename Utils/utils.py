@@ -35,6 +35,8 @@ logger.addHandler(console_handler)
 
 
 # %%
+
+
 def call_llm(
     model_name: str, backup_model_name: str, prompt: List, tool=None, tool_choice=None
 ):
@@ -116,7 +118,8 @@ class ContentExtractor(object):
     def __init__(self, temp_dir=temp_files_path, k=3):
         self.k = k
         self.temp_dir = temp_dir
-        embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
+        # BAAI/bge-m3
+        embeddings = HuggingFaceEmbeddings(model_name="Qwen/Qwen3-Embedding-0.6B")
         self.docs = [Document("None", metadata={"path": "None", "content": "None"})]
         self.vectorstore = Chroma.from_documents(
             documents=self.docs,
@@ -130,7 +133,7 @@ class ContentExtractor(object):
                 self.vectorstore.as_retriever(search_kwargs={"k": self.k}),
                 self.bm25_retriever,
             ],
-            weights=[0.7, 0.3],
+            weights=[0.8, 0.2],
         )
 
     def update_new_docs(self, files):
@@ -160,7 +163,7 @@ class ContentExtractor(object):
                 self.vectorstore.as_retriever(search_kwargs={"k": self.k}),
                 self.bm25_retriever,
             ],
-            weights=[0.7, 0.3],
+            weights=[0.8, 0.2],
         )
 
     def query(self, q):
@@ -171,7 +174,7 @@ class ContentExtractor(object):
                 continue
             seen.add(res.page_content)
             expanded_content = track_expanded_context(
-                res.metadata["content"], res.page_content, 1500, 500
+                res.metadata["content"], res.page_content, 1500, 1000
             )
             return_res = deepcopy(res)
             return_res.metadata["content"] = expanded_content

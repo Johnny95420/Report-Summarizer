@@ -107,33 +107,34 @@ async def check_search_quality_async(query: str, document: str) -> int:
 
 
 def get_searching_budget(state: AgenticSearchState):
-    queries = state["queries"]
-    query_list = ""
-    for q in queries:
-        query_list += f"- {q}\n"
-    system_instruction = iteration_budget_instruction.format(query_list=query_list)
+    # queries = state["queries"]
+    # query_list = ""
+    # for q in queries:
+    #     query_list += f"- {q}\n"
+    # system_instruction = iteration_budget_instruction.format(query_list=query_list)
 
-    budget_value = None
-    retry = 0
-    while retry < 5 and budget_value is None:
-        result = call_llm(
-            MODEL_NAME,
-            BACKUP_MODEL_NAME,
-            prompt=[SystemMessage(content=system_instruction)]
-            + [
-                HumanMessage(
-                    content="Please give me the budget of searching iterations."
-                )
-            ],
-            tool=[searching_budget_formatter],
-            tool_choice="required",
-        )
-        try:
-            budget_value = result.tool_calls[0]["args"]["budget"]
-        except (IndexError, KeyError):
-            logger.warning(f"Failed to get budget from tool call")
-            retry += 1
-    logger.info(f"searching budget : {budget_value}")
+    # budget_value = None
+    # retry = 0
+    # while retry < 5 and budget_value is None:
+    #     result = call_llm(
+    #         MODEL_NAME,
+    #         BACKUP_MODEL_NAME,
+    #         prompt=[SystemMessage(content=system_instruction)]
+    #         + [
+    #             HumanMessage(
+    #                 content="Please give me the budget of searching iterations."
+    #             )
+    #         ],
+    #         tool=[searching_budget_formatter],
+    #         tool_choice="required",
+    #     )
+    #     try:
+    #         budget_value = result.tool_calls[0]["args"]["budget"]
+    #     except (IndexError, KeyError):
+    #         logger.warning(f"Failed to get budget from tool call")
+    #         retry += 1
+    # logger.info(f"searching budget : {budget_value}")
+    budget_value = 1
     return {"max_num_iterations": budget_value}
 
 
