@@ -37,9 +37,9 @@ from langgraph.types import Command
 
 # Setup logger
 logger = logging.getLogger("AgenticSearch")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.ERROR)
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
+console_handler.setLevel(logging.ERROR)
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
@@ -168,44 +168,43 @@ def perform_web_search(state: AgenticSearchState):
     }
 
 
-def filter_and_format_results(state: AgenticSearchState):
-    async def _filter_and_format_results():
-        followed_up_queries = state.get("followed_up_queries", "")
-        queries = followed_up_queries if followed_up_queries else state["queries"]
-        web_results = state["web_results"]
-        logger.info("Filtering and formatting web search results.")
+async def filter_and_format_results(state: AgenticSearchState):
+    followed_up_queries = state.get("followed_up_queries", "")
+    queries = followed_up_queries if followed_up_queries else state["queries"]
+    web_results = state["web_results"]
+    logger.info("Filtering and formatting web search results.")
 
-        tasks = []
-        for query, response in zip(queries, web_results):
-            for result in response["results"]:
-                document = f"Title:{result['title']}\n\nContent:{result['content']}\n\nRaw Content:{result['raw_content']}"
-                tasks.append(
-                    (
-                        query,
-                        result,
-                        check_search_quality_async(query, document),
-                    )
+    tasks = []
+    for query, response in zip(queries, web_results):
+        for result in response["results"]:
+            document = f"Title:{result['title']}\n\nContent:{result['content']}\n\nRaw Content:{result['raw_content']}"
+            tasks.append(
+                (
+                    query,
+                    result,
+                    check_search_quality_async(query, document),
                 )
+            )
 
-        scores = await asyncio.gather(*[task[2] for task in tasks])
+    scores = await asyncio.gather(*[task[2] for task in tasks])
 
-        filtered_web_results = []
-        results_by_query = {query: [] for query in queries}
+    filtered_web_results = []
+    results_by_query = {query: [] for query in queries}
 
-        for query, result, score in [
-            (tasks[i][0], tasks[i][1], scores[i]) for i in range(len(tasks))
-        ]:
-            if score is not None and score > 2:
-                result["score"] = score
-                results_by_query[query].append(result)
+    for query, result, score in [
+        (tasks[i][0], tasks[i][1], scores[i]) for i in range(len(tasks))
+    ]:
+        if score is not None and score > 2:
+            result["score"] = score
+            results_by_query[query].append(result)
 
-        for query in queries:
-            filtered_web_results.append({"results": results_by_query[query]})
+    for query in queries:
+        filtered_web_results.append({"results": results_by_query[query]})
 
-        logger.info("Finished filtering and formatting results.")
-        return {"filtered_web_results": filtered_web_results}
+    logger.info("Finished filtering and formatting results.")
 
-    return asyncio.run(_filter_and_format_results())
+    await asyncio.sleep(1)
+    return {"filtered_web_results": filtered_web_results}
 
 
 def compress_raw_content(state: AgenticSearchState):

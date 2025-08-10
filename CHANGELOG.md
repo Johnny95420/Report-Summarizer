@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-08-09
+
+### Added
+- Implemented full asynchronous architecture to resolve event loop conflicts and improve performance.
+- Added `AsyncSqliteSaver` support in `report_writer.py` for async checkpoint management.
+- Introduced `get_async_graph()` method in `ReportGraphBuilder` for creating async-compatible LangGraph instances.
+- Added async versions of all main execution scripts with proper `AsyncSqliteSaver` integration.
+- Implemented robust tool call validation in `Utils/utils.py` with automatic retry mechanism for required tool calls.
+
+### Changed
+- **BREAKING**: Converted `search_db` function in `report_writer.py` to async, now uses `await agentic_search_graph.ainvoke()`.
+- **BREAKING**: Converted `filter_and_format_results` function in `agentic_search.py` to async with proper `await asyncio.gather()` for concurrent processing.
+- Updated `run_industry_report.py` to use async context manager with `AsyncSqliteSaver.from_conn_string()`.
+- Updated `run_research_report.py` to use async report generation with proper state history management.
+- Updated `agent_cli.py` to support async report generation while maintaining CLI functionality.
+- Enhanced `ReportGraphBuilder` to support both synchronous and asynchronous graph instances.
+- Enhanced `call_llm` and `call_llm_async` functions in `Utils/utils.py` to use LiteLLM fallbacks parameter instead of manual try-catch for model switching.
+- Improved `call_llm` and `call_llm_async` functions to automatically validate and retry tool calls when `tool_choice="required"` is set, with up to 3 retry attempts.
+- Simplified error handling in `report_writer.py` by removing manual try-catch blocks for tool call failures, now relying on robust validation in `call_llm` functions.
+
+
 ## [0.2.1] - 2025-08-08
 
 ### Added
