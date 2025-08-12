@@ -7,17 +7,17 @@ from copy import deepcopy
 from typing import List
 
 import requests
-from requests.adapters import HTTPAdapter
-from requests.exceptions import RequestException, Timeout, ConnectionError
-from urllib3.util.retry import Retry
 from langchain.retrievers import BM25Retriever
 from langchain.retrievers.ensemble import EnsembleRetriever
 from langchain.schema import Document
+from langchain_litellm import ChatLiteLLM
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.chat_models import ChatLiteLLM
+from requests.adapters import HTTPAdapter
+from requests.exceptions import ConnectionError, RequestException, Timeout
 from tavily import TavilyClient
+from urllib3.util.retry import Retry
 
 from State.state import Section
 
@@ -55,8 +55,6 @@ formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(messag
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-
-# %%
 
 except_model_name = set(["o3-mini", "o4-mini", "gpt-5", "gpt-5-nano", "gpt-5-mini"])
 

@@ -17,9 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **BREAKING**: Converted `search_db` function in `report_writer.py` to async, now uses `await agentic_search_graph.ainvoke()`.
 - **BREAKING**: Converted `filter_and_format_results` function in `agentic_search.py` to async with proper `await asyncio.gather()` for concurrent processing.
-- Updated `run_industry_report.py` to use async context manager with `AsyncSqliteSaver.from_conn_string()`.
-- Updated `run_research_report.py` to use async report generation with proper state history management.
-- Updated `agent_cli.py` to support async report generation while maintaining CLI functionality.
+- **BREAKING**: Converted `compress_raw_content` function in `agentic_search.py` to async with parallel processing using `await asyncio.gather()` for improved performance.
 - Enhanced `ReportGraphBuilder` to support both synchronous and asynchronous graph instances.
 - Enhanced `call_llm` and `call_llm_async` functions in `Utils/utils.py` to use LiteLLM fallbacks parameter instead of manual try-catch for model switching.
 - Improved `call_llm` and `call_llm_async` functions to automatically validate and retry tool calls when `tool_choice="required"` is set, with up to 3 retry attempts.

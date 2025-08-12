@@ -1,6 +1,7 @@
 import asyncio
+import copy
 import logging
-from typing import List, TypedDict, Set
+from typing import List, Set, TypedDict
 
 # Load configurations
 import omegaconf
@@ -16,24 +17,17 @@ BACKUP_MODEL_NAME = config["BACKUP_MODEL_NAME"]
 VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
 BACKUP_VERIFY_MODEL_NAME = config["BACKUP_VERIFY_MODEL_NAME"]
 
+from langchain_community.callbacks.infino_callback import get_num_tokens
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command
 
 from Prompt.agentic_search_prompt import *
-from Tools.tools import (
-    quality_formatter,
-    queries_formatter,
-    summary_formatter,
-    searching_budget_formatter,
-    searching_grader_formatter,
-)
-from Utils.utils import (
-    call_llm,
-    call_llm_async,
-    selenium_api_search,
-    web_search_deduplicate_and_format_sources,
-)
-from langgraph.types import Command
+from Tools.tools import (quality_formatter, queries_formatter,
+                         searching_budget_formatter,
+                         searching_grader_formatter, summary_formatter)
+from Utils.utils import (call_llm, call_llm_async, selenium_api_search,
+                         web_search_deduplicate_and_format_sources)
 
 # Setup logger
 logger = logging.getLogger("AgenticSearch")
@@ -43,6 +37,29 @@ console_handler.setLevel(logging.ERROR)
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
+
+
+def select_model_based_on_tokens(
+    content: str, token_threshold: int = 4096
+) -> tuple[str, str]:
+    """
+    Select appropriate model based on content token length.
+
+    Args:
+        content: The text content to analyze
+        token_threshold: Token count threshold for model selection
+
+    Returns:
+        Tuple of (primary_model, backup_model)
+    """
+    content_tokens = get_num_tokens(content, "gpt-4o-mini")
+
+    if content_tokens > token_threshold:
+        # Use heavy models for long content
+        return MODEL_NAME, BACKUP_MODEL_NAME
+    else:
+        # Use light models for shorter content
+        return LIGHT_MODEL_NAME, BACKUP_LIGHT_MODEL_NAME
 
 
 # TODO:The final results are not getting better after applied this node
@@ -80,29 +97,26 @@ class AgenticSearchState(TypedDict):
 
 async def check_search_quality_async(query: str, document: str) -> int:
     score = None
-    retry = 0
-    while retry < 5 and score is None:
-        system_instruction = results_filter_instruction.format(
-            query=query, document=document
-        )
-        results = await call_llm_async(
-            LIGHT_MODEL_NAME,
-            BACKUP_LIGHT_MODEL_NAME,
-            prompt=[SystemMessage(content=system_instruction)]
-            + [
-                HumanMessage(
-                    content="Generate the score of document on the provided query."
-                )
-            ],
-            tool=[quality_formatter],
-            tool_choice="required",
-        )
-        try:
-            score = results.tool_calls[0]["args"]["score"]
-        except (IndexError, KeyError):
-            logger.warning(f"Failed to get score from tool call for query: {query}")
-            retry += 1
+    system_instruction = results_filter_instruction.format(
+        query=query, document=document
+    )
 
+    # Select appropriate model based on document token length
+    model_name, backup_model_name = select_model_based_on_tokens(document)
+
+    results = await call_llm_async(
+        model_name,
+        backup_model_name,
+        prompt=[SystemMessage(content=system_instruction)]
+        + [
+            HumanMessage(
+                content="Generate the score of document on the provided query."
+            )
+        ],
+        tool=[quality_formatter],
+        tool_choice="required",
+    )
+    score = results.tool_calls[0]["args"]["score"]
     return score
 
 
@@ -174,73 +188,152 @@ async def filter_and_format_results(state: AgenticSearchState):
     web_results = state["web_results"]
     logger.info("Filtering and formatting web search results.")
 
-    tasks = []
+    # Create semaphore to limit concurrent operations
+    semaphore = asyncio.Semaphore(4)
+
+    async def check_quality_with_metadata(
+        query: str, result: dict
+    ) -> tuple[str, dict, int]:
+        """Check quality with semaphore control and metadata preservation."""
+        async with semaphore:
+            try:
+                document = f"Title:{result['title']}\n\nContent:{result['content']}\n\nRaw Content:{result['raw_content']}"
+                score = await check_search_quality_async(query, document)
+                return query, result, score
+            except Exception as e:
+                logger.warning(
+                    f"Quality check failed for result {result.get('url', 'unknown')}: {e}"
+                )
+                return query, result, 0  # Return 0 score for failed checks
+
+    # Create tasks with metadata preserved
+    quality_tasks = []
     for query, response in zip(queries, web_results):
         for result in response["results"]:
-            document = f"Title:{result['title']}\n\nContent:{result['content']}\n\nRaw Content:{result['raw_content']}"
-            tasks.append(
-                (
-                    query,
-                    result,
-                    check_search_quality_async(query, document),
-                )
-            )
+            quality_tasks.append(check_quality_with_metadata(query, result))
 
-    scores = await asyncio.gather(*[task[2] for task in tasks])
+    # Execute all quality checks with error handling
+    try:
+        quality_results = await asyncio.gather(*quality_tasks, return_exceptions=True)
+    except Exception as e:
+        logger.error(f"Batch quality check failed: {e}")
+        return {"filtered_web_results": [{"results": []} for _ in queries]}
 
-    filtered_web_results = []
+    # Process results with error handling
     results_by_query = {query: [] for query in queries}
 
-    for query, result, score in [
-        (tasks[i][0], tasks[i][1], scores[i]) for i in range(len(tasks))
-    ]:
+    for quality_result in quality_results:
+        if isinstance(quality_result, Exception):
+            logger.warning(f"Quality check exception: {quality_result}")
+            continue
+
+        query, search_result, score = quality_result
         if score is not None and score > 2:
-            result["score"] = score
-            results_by_query[query].append(result)
+            search_result["score"] = score
+            results_by_query[query].append(search_result)
 
-    for query in queries:
-        filtered_web_results.append({"results": results_by_query[query]})
+    # Build final results structure
+    filtered_web_results = [{"results": results_by_query[query]} for query in queries]
 
-    logger.info("Finished filtering and formatting results.")
+    total_filtered = sum(len(results["results"]) for results in filtered_web_results)
+    logger.info(f"Finished filtering: {total_filtered} results passed quality check.")
 
-    await asyncio.sleep(1)
     return {"filtered_web_results": filtered_web_results}
 
 
-def compress_raw_content(state: AgenticSearchState):
+async def compress_raw_content(state: AgenticSearchState):
     followed_up_queries = state.get("followed_up_queries", "")
     queries = followed_up_queries if followed_up_queries else state["queries"]
     filtered_web_results = state["filtered_web_results"]
-    final_results = []
-    for query, results in zip(queries, filtered_web_results):
-        query_results = {"results": []}
-        for result in results["results"]:
-            document = f"Title:{result['title']},Brief Content:{result['content']},Full Content:{result['raw_content']}"
-            system_instruction = results_compress_instruction.format(
-                query=query, document=document
+
+    # Create semaphore to limit concurrent compression operations
+    semaphore = asyncio.Semaphore(2)
+
+    async def compress_content_with_metadata(
+        query_idx: int, result_idx: int, query: str, result: dict
+    ):
+        """Compress content with semaphore control and metadata preservation."""
+        async with semaphore:
+            try:
+                document = f"Title:{result['title']},Brief Content:{result['content']},Full Content:{result['raw_content']}"
+                system_instruction = results_compress_instruction.format(
+                    query=query, document=document
+                )
+
+                # Select appropriate model based on raw_content token length
+                model_name, backup_model_name = select_model_based_on_tokens(
+                    result["raw_content"]
+                )
+
+                compressed_result = await call_llm_async(
+                    model_name,
+                    backup_model_name,
+                    prompt=[SystemMessage(content=system_instruction)]
+                    + [
+                        HumanMessage(
+                            content="Please help me to summary every piece of document directly, indirectly, potentially, or partially related to the query."
+                        )
+                    ],
+                    tool=[summary_formatter],
+                    tool_choice="required",
+                )
+
+                return query_idx, result_idx, result, compressed_result
+
+            except Exception as e:
+                logger.warning(
+                    f"Content compression failed for result {result.get('url', 'unknown')}: {e}"
+                )
+                # Return original result with empty summary on failure
+                return query_idx, result_idx, result, None
+
+    # Create compression tasks with metadata preserved
+    compression_tasks = []
+    for query_idx, (query, results) in enumerate(zip(queries, filtered_web_results)):
+        for result_idx, result in enumerate(results["results"]):
+            compression_tasks.append(
+                compress_content_with_metadata(query_idx, result_idx, query, result)
             )
-            compressed_result = call_llm(
-                MODEL_NAME,
-                BACKUP_MODEL_NAME,
-                prompt=[SystemMessage(content=system_instruction)]
-                + [
-                    HumanMessage(
-                        content="Please help me to summary every piece of document directly, indirectly, potentially, or partially related to the query."
-                    )
-                ],
-                tool=[summary_formatter],
-                tool_choice="required",
-            )
-            logger.info(f"{len(compressed_result.tool_calls)} tool calls in compress")
+
+    # Execute all compression tasks with error handling
+    try:
+        compression_results = await asyncio.gather(
+            *compression_tasks, return_exceptions=True
+        )
+    except Exception as e:
+        logger.error(f"Batch compression failed: {e}")
+        return {"compressed_web_results": [{"results": []} for _ in queries]}
+
+    # Organize results back into the original structure
+    final_results = [{"results": []} for _ in range(len(queries))]
+
+    successful_compressions = 0
+    for compression_result in compression_results:
+        if isinstance(compression_result, Exception):
+            logger.warning(f"Compression exception: {compression_result}")
+            continue
+
+        query_idx, result_idx, original_result, compressed_result = compression_result
+
+        if compressed_result is not None:
+            # Process successful compression
             summary_content = ""
             for tool_call in compressed_result.tool_calls:
                 summary_content += (
                     tool_call["args"]["summary_content"] + "====" + "\n\n"
                 )
-            result["raw_content"] = summary_content
-            query_results["results"].append(result)
-        final_results.append(query_results)
 
+            new_result = copy.deepcopy(original_result)
+            new_result["raw_content"] = summary_content
+            final_results[query_idx]["results"].append(new_result)
+            successful_compressions += 1
+        else:
+            # Use original content for failed compressions
+            final_results[query_idx]["results"].append(original_result)
+
+    logger.info(
+        f"Content compression completed: {successful_compressions}/{len(compression_tasks)} successful"
+    )
     return {"compressed_web_results": final_results}
 
 
@@ -260,6 +353,9 @@ def check_searching_results(state: AgenticSearchState):
     system_instruction = searching_results_grader.format(
         query=queries, context=source_str
     )
+    if state["curr_num_iterations"] >= state["max_num_iterations"]:
+        return Command(goto=END)
+
     feedback = call_llm(
         MODEL_NAME,
         BACKUP_MODEL_NAME,
@@ -273,10 +369,7 @@ def check_searching_results(state: AgenticSearchState):
         tool_choice="required",
     )
     feedback = feedback.tool_calls[0]["args"]
-    if (
-        feedback["grade"] == "pass"
-        or state["curr_num_iterations"] >= state["max_num_iterations"]
-    ):
+    if feedback["grade"] == "pass":
         return Command(goto=END)
     else:
         return Command(
