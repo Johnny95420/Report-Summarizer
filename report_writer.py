@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 
 load_dotenv(".env")
+import asyncio
 import logging
 
 import sqlite3
@@ -67,6 +68,7 @@ from Tools.tools import (
 )
 from Utils.utils import (
     call_llm,
+    call_llm_async,
     format_human_feedback,
     format_search_results_with_metadata,
     format_sections,
@@ -443,15 +445,14 @@ def should_refine(state: ReportState):
         return "gather_complete_section"
 
 
-def gather_complete_section(state: ReportState, config: RunnableConfig):
+async def gather_complete_section(state: ReportState, config: RunnableConfig):
     logger.info("===Gathering and refining completed sections===")
     completed_sections = state["completed_sections"]
 
     # Use static full_context to refine content for consistency
     full_context = format_sections(completed_sections)
-    refined_sections = []
 
-    for section in completed_sections:
+    async def refine_content_for_section(section):
         if section.research:  # Only refine research sections for content consistency
             logger.info(f"Refining content for section: {section.name}")
 
@@ -461,7 +462,7 @@ def gather_complete_section(state: ReportState, config: RunnableConfig):
                 full_context=full_context,
             )
 
-            refined_output = call_llm(
+            refined_output = await call_llm_async(
                 WRITER_MODEL_NAME,
                 BACKUP_WRITER_MODEL_NAME,
                 [SystemMessage(content=system_instructions)]
@@ -473,11 +474,16 @@ def gather_complete_section(state: ReportState, config: RunnableConfig):
                 tool=[content_refinement_formatter],
                 tool_choice="required",
             )
-            # call_llm with tool_choice="required" now handles all retries automatically
+            # call_llm_async with tool_choice="required" now handles all retries automatically
             refined_content = refined_output.tool_calls[0]["args"]["refined_content"]
             section.content = refined_content
 
-        refined_sections.append(section)
+        return section
+
+    # Process all sections concurrently
+    refined_sections = await asyncio.gather(
+        *[refine_content_for_section(section) for section in completed_sections]
+    )
 
     completed_report_sections = format_sections(refined_sections)
     return {
@@ -486,20 +492,18 @@ def gather_complete_section(state: ReportState, config: RunnableConfig):
     }
 
 
-def refine_sections(state: ReportState, config: RunnableConfig):
+async def refine_sections(state: ReportState, config: RunnableConfig):
     logger.info("===Refining sections===")
     configurable = config["configurable"]
     number_of_queries = configurable["number_of_queries"]
     sections = state["completed_sections"]
     # use static full_context to avoid error cummulation and hit token cache
     full_context = format_sections(sections)
-    refined_sections = []
-    for section in sections:
-        if not section.research:
-            refined_sections.append([section, None])
-            continue
 
-        # TODO: Refining in an orderly manner can help minimize content gaps, but it is somewhat inefficient. Is there a better approach?
+    async def refine_single_section(section):
+        if not section.research:
+            return [section, None]
+
         system_instructions = refine_section_instructions.format(
             section_name=section.name,
             section_description=section.description,
@@ -507,26 +511,45 @@ def refine_sections(state: ReportState, config: RunnableConfig):
             full_context=full_context,
             number_of_queries=number_of_queries,
         )
-
-        refined_output = call_llm(
+        context = [SystemMessage(content=system_instructions)] + [
+            HumanMessage(
+                content="Refine the section based on the full report context and give me new queries.Remember to give me refined_description, refined_content and new_queries in formatted outputs."
+            )
+        ]
+        refined_output = await call_llm_async(
             WRITER_MODEL_NAME,
             BACKUP_WRITER_MODEL_NAME,
-            [SystemMessage(content=system_instructions)]
-            + [
-                HumanMessage(
-                    content="Refine the section based on the full report context. Remember to use the tool to format outputs."
-                )
-            ],
+            context,
             tool=[refine_section_formatter],
             tool_choice="required",
         )
-        # call_llm with tool_choice="required" now handles all retries automatically
-        refined_section_data = refined_output.tool_calls[0]["args"]
+        try:
+            refined_section_data = refined_output.tool_calls[0]["args"]
+            section.description += "\n\n" + refined_section_data["refined_description"]
+            section.content = refined_section_data["refined_content"]
+            new_queries = refined_section_data["new_queries"]
 
-        section.description += "\n\n" + refined_section_data["refined_description"]
-        section.content = refined_section_data["refined_content"]
-        new_queries = refined_section_data["new_queries"]
-        refined_sections.append([section, new_queries])
+        except Exception as e:
+            logger.error(e)
+            refined_output = await call_llm_async(
+                WRITER_MODEL_NAME,
+                BACKUP_WRITER_MODEL_NAME,
+                context,
+                tool=[refine_section_formatter],
+                tool_choice="required",
+            )
+            refined_section_data = refined_output.tool_calls[0]["args"]
+            section.description += "\n\n" + refined_section_data["refined_description"]
+            section.content = refined_section_data["refined_content"]
+            new_queries = refined_section_data["new_queries"]
+
+        return [section, new_queries]
+
+    # Process all sections concurrently
+    refined_sections = await asyncio.gather(
+        *[refine_single_section(section) for section in sections]
+    )
+
     return Command(
         update={
             "completed_sections": "__CLEAR__",

@@ -18,10 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING**: Converted `search_db` function in `report_writer.py` to async, now uses `await agentic_search_graph.ainvoke()`.
 - **BREAKING**: Converted `filter_and_format_results` function in `agentic_search.py` to async with proper `await asyncio.gather()` for concurrent processing.
 - **BREAKING**: Converted `compress_raw_content` function in `agentic_search.py` to async with parallel processing using `await asyncio.gather()` for improved performance.
+- **BREAKING**: Converted `refine_sections` function in `report_writer.py` to async with concurrent LLM processing using `await asyncio.gather()` for significantly improved performance when refining multiple sections.
+- **BREAKING**: Converted `gather_complete_section` function in `report_writer.py` to async with concurrent content refinement processing using `await asyncio.gather()` for parallel section refinement.
 - Enhanced `ReportGraphBuilder` to support both synchronous and asynchronous graph instances.
-- Enhanced `call_llm` and `call_llm_async` functions in `Utils/utils.py` to use LiteLLM fallbacks parameter instead of manual try-catch for model switching.
-- Improved `call_llm` and `call_llm_async` functions to automatically validate and retry tool calls when `tool_choice="required"` is set, with up to 3 retry attempts.
+- Enhanced `call_llm` and `call_llm_async` functions in `Utils/utils.py` to use LangChain's `with_fallbacks()` method for proper model switching on API errors.
+- Improved fallback mechanism to distinguish between API errors (triggers backup model) and validation errors (retries with primary model).
+- Enhanced `call_llm` and `call_llm_async` functions to automatically validate and retry tool calls when `tool_choice="required"` is set, with up to 3 retry attempts for validation failures using the primary model only.
 - Simplified error handling in `report_writer.py` by removing manual try-catch blocks for tool call failures, now relying on robust validation in `call_llm` functions.
+- Refactored `call_llm` and `call_llm_async` functions to use `RunnableLambda` for tool call validation and improved fallback mechanism to ensure backup model switching on tool call failures.
 
 
 ## [0.2.1] - 2025-08-08

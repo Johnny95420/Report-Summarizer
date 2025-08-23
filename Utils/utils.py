@@ -11,6 +11,7 @@ from langchain.retrievers import BM25Retriever
 from langchain.retrievers.ensemble import EnsembleRetriever
 from langchain.schema import Document
 from langchain_litellm import ChatLiteLLM
+from langchain_core.runnables import RunnableLambda
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -62,179 +63,72 @@ except_model_name = set(["o3-mini", "o4-mini", "gpt-5", "gpt-5-nano", "gpt-5-min
 def call_llm(
     model_name: str, backup_model_name: str, prompt: List, tool=None, tool_choice=None
 ):
-    temperature = 0.5
-    if model_name in except_model_name:
-        temperature = 1
+    temperature = 1 if model_name in except_model_name else 0.5
+    backup_temperature = 1 if backup_model_name in except_model_name else 0.5
 
-    model = ChatLiteLLM(
-        model=model_name, temperature=temperature, fallbacks=[backup_model_name]
+    primary = ChatLiteLLM(
+        model=model_name,
+        temperature=temperature,
+    )
+
+    if tool:
+        primary = primary.bind_tools(tools=tool, tool_choice=tool_choice)
+
+    def _validate_tool_calls(msg):
+        if tool and tool_choice == "required":
+            if not getattr(msg, "tool_calls", None):
+                raise ValueError("Required tool call missing")
+        if not (getattr(msg, "content", None) or getattr(msg, "tool_calls", None)):
+            raise ValueError("Empty model output")
+        return msg
+
+    validated_primary = primary | RunnableLambda(_validate_tool_calls)
+
+    backup = ChatLiteLLM(
+        model=backup_model_name,
+        temperature=backup_temperature,
     )
     if tool:
-        model = model.bind_tools(tools=tool, tool_choice=tool_choice)
+        backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
 
-    # If tool is required, add retry mechanism for tool call validation
-    if tool and tool_choice == "required":
-        max_retries = 3
-        last_exception = None
+    model = validated_primary.with_fallbacks([backup])
 
-        for attempt in range(max_retries):
-            try:
-                response = model.invoke(prompt)
-
-                # Validate tool call response
-                if not hasattr(response, "tool_calls") or not response.tool_calls:
-                    logger.warning(
-                        f"No tool_calls in response, attempt {attempt + 1}/{max_retries}"
-                    )
-                    if attempt == max_retries - 1:
-                        raise ValueError(
-                            f"Failed to get required tool calls after {max_retries} attempts"
-                        )
-                    continue
-
-                # Check if tool_calls have proper structure
-                try:
-                    first_tool_call = response.tool_calls[0]
-                    if (
-                        not isinstance(first_tool_call, dict)
-                        or "args" not in first_tool_call
-                    ):
-                        logger.warning(
-                            f"Invalid tool_call structure, attempt {attempt + 1}/{max_retries}"
-                        )
-                        if attempt == max_retries - 1:
-                            raise ValueError(
-                                f"Tool calls have invalid structure after {max_retries} attempts"
-                            )
-                        continue
-                except (IndexError, KeyError, TypeError) as e:
-                    logger.warning(
-                        f"Error accessing tool_call data: {e}, attempt {attempt + 1}/{max_retries}"
-                    )
-                    if attempt == max_retries - 1:
-                        raise ValueError(
-                            f"Failed to access tool call data after {max_retries} attempts: {e}"
-                        )
-                    continue
-
-                # Success - return valid response
-                logger.info(
-                    f"Successfully obtained required tool calls on attempt {attempt + 1}"
-                )
-                return response
-
-            except Exception as e:
-                last_exception = e
-                logger.error(
-                    f"Error in call_llm attempt {attempt + 1}/{max_retries}: {type(e).__name__}: {str(e)}"
-                )
-                if attempt == max_retries - 1:
-                    logger.error(
-                        f"All {max_retries} attempts failed for required tool call"
-                    )
-                    raise e
-                continue
-
-        # This should not be reached, but just in case
-        if last_exception:
-            raise last_exception
-        else:
-            raise ValueError(
-                f"Failed to get required tool calls after {max_retries} attempts"
-            )
-    else:
-        # Normal call without tool validation
-        response = model.invoke(prompt)
-        return response
+    return model.invoke(prompt)
 
 
 async def call_llm_async(
     model_name: str, backup_model_name: str, prompt: List, tool=None, tool_choice=None
 ):
-    temperature = 0.5
-    if model_name in except_model_name:
-        temperature = 1
+    temperature = 1 if model_name in except_model_name else 0.5
+    backup_temperature = 1 if backup_model_name in except_model_name else 0.5
 
-    model = ChatLiteLLM(
-        model=model_name, temperature=temperature, fallbacks=[backup_model_name]
+    primary = ChatLiteLLM(
+        model=model_name,
+        temperature=temperature,
+    )
+
+    if tool:
+        primary = primary.bind_tools(tools=tool, tool_choice=tool_choice)
+
+    def _validate_tool_calls(msg):
+        if tool and tool_choice == "required":
+            if not getattr(msg, "tool_calls", None):
+                raise ValueError("Required tool call missing")
+        if not (getattr(msg, "content", None) or getattr(msg, "tool_calls", None)):
+            raise ValueError("Empty model output")
+        return msg
+
+    validated_primary = primary | RunnableLambda(_validate_tool_calls)
+
+    backup = ChatLiteLLM(
+        model=backup_model_name,
+        temperature=backup_temperature,
     )
     if tool:
-        model = model.bind_tools(tools=tool, tool_choice=tool_choice)
+        backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
 
-    # If tool is required, add retry mechanism for tool call validation
-    if tool and tool_choice == "required":
-        max_retries = 3
-        last_exception = None
-
-        for attempt in range(max_retries):
-            try:
-                response = await model.ainvoke(prompt)
-
-                # Validate tool call response
-                if not hasattr(response, "tool_calls") or not response.tool_calls:
-                    logger.warning(
-                        f"No tool_calls in response, attempt {attempt + 1}/{max_retries}"
-                    )
-                    if attempt == max_retries - 1:
-                        raise ValueError(
-                            f"Failed to get required tool calls after {max_retries} attempts"
-                        )
-                    continue
-
-                # Check if tool_calls have proper structure
-                try:
-                    first_tool_call = response.tool_calls[0]
-                    if (
-                        not isinstance(first_tool_call, dict)
-                        or "args" not in first_tool_call
-                    ):
-                        logger.warning(
-                            f"Invalid tool_call structure, attempt {attempt + 1}/{max_retries}"
-                        )
-                        if attempt == max_retries - 1:
-                            raise ValueError(
-                                f"Tool calls have invalid structure after {max_retries} attempts"
-                            )
-                        continue
-                except (IndexError, KeyError, TypeError) as e:
-                    logger.warning(
-                        f"Error accessing tool_call data: {e}, attempt {attempt + 1}/{max_retries}"
-                    )
-                    if attempt == max_retries - 1:
-                        raise ValueError(
-                            f"Failed to access tool call data after {max_retries} attempts: {e}"
-                        )
-                    continue
-
-                # Success - return valid response
-                logger.info(
-                    f"Successfully obtained required tool calls on attempt {attempt + 1}"
-                )
-                return response
-
-            except Exception as e:
-                last_exception = e
-                logger.error(
-                    f"Error in call_llm_async attempt {attempt + 1}/{max_retries}: {type(e).__name__}: {str(e)}"
-                )
-                if attempt == max_retries - 1:
-                    logger.error(
-                        f"All {max_retries} attempts failed for required tool call"
-                    )
-                    raise e
-                continue
-
-        # This should not be reached, but just in case
-        if last_exception:
-            raise last_exception
-        else:
-            raise ValueError(
-                f"Failed to get required tool calls after {max_retries} attempts"
-            )
-    else:
-        # Normal call without tool validation
-        response = await model.ainvoke(prompt)
-        return response
+    model = validated_primary.with_fallbacks([backup])
+    return await model.ainvoke(prompt)
 
 
 def track_expanded_context(

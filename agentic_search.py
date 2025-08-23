@@ -23,11 +23,19 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from Prompt.agentic_search_prompt import *
-from Tools.tools import (quality_formatter, queries_formatter,
-                         searching_budget_formatter,
-                         searching_grader_formatter, summary_formatter)
-from Utils.utils import (call_llm, call_llm_async, selenium_api_search,
-                         web_search_deduplicate_and_format_sources)
+from Tools.tools import (
+    quality_formatter,
+    queries_formatter,
+    searching_budget_formatter,
+    searching_grader_formatter,
+    summary_formatter,
+)
+from Utils.utils import (
+    call_llm,
+    call_llm_async,
+    selenium_api_search,
+    web_search_deduplicate_and_format_sources,
+)
 
 # Setup logger
 logger = logging.getLogger("AgenticSearch")
@@ -189,7 +197,7 @@ async def filter_and_format_results(state: AgenticSearchState):
     logger.info("Filtering and formatting web search results.")
 
     # Create semaphore to limit concurrent operations
-    semaphore = asyncio.Semaphore(4)
+    semaphore = asyncio.Semaphore(2)
 
     async def check_quality_with_metadata(
         query: str, result: dict
