@@ -167,7 +167,7 @@ class ContentExtractor(object):
         self.k = k
         self.temp_dir = temp_dir
         # BAAI/bge-m3
-        embeddings = HuggingFaceEmbeddings(model_name="Qwen/Qwen3-Embedding-0.6B")
+        embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
         self.docs = [Document("None", metadata={"path": "None", "content": "None"})]
         self.vectorstore = Chroma.from_documents(
             documents=self.docs,
@@ -347,10 +347,10 @@ def selenium_api_search(search_queries, include_raw_content: bool):
                     params={
                         "query": query,
                         "include_raw_content": include_raw_content,
-                        "max_results": 3,
-                        "timeout": 40,
+                        "max_results": 5,
+                        "timeout": 600,
                     },
-                    timeout=120,  # Give slightly more time than the service timeout
+                    timeout=600,  # Give slightly more time than the service timeout
                 )
                 output.raise_for_status()  # Raise exception for HTTP errors
 
@@ -410,6 +410,9 @@ def selenium_api_search(search_queries, include_raw_content: bool):
                 if result.get("raw_content", "") is None:
                     continue
                 try:
+                    if len(result.get("raw_content", "")) >= 70000:
+                        result["raw_content"] = result["raw_content"][:20000]
+
                     if len(result.get("raw_content", "")) >= 5000:
                         file_path = f"{temp_files_path}/{result['title']}.txt"
                         with open(file_path, "w", encoding="utf-8") as f:
