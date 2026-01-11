@@ -7,6 +7,18 @@ from pydantic import BaseModel, Field
 
 
 # %%
+def clearable_list_reducer(left: list | None, right: list | str | None) -> list:
+    if isinstance(right, list) and right[0] == "__CLEAR__":
+        left, right = None, right[1:]
+    if right == "__CLEAR__":
+        return []
+    if left is None:
+        left = []
+    if right is None:
+        right = []
+    return left + right
+
+
 class Section(BaseModel):
     name: str = Field(
         description="Name for this section of the report.",
@@ -20,9 +32,19 @@ class Section(BaseModel):
     content: str = Field(description="The content of the section.")
 
 
+class RefinedSection(BaseModel):
+    description: str = Field(
+        description="The refined and enhanced description of the section.",
+    )
+    content: str = Field(
+        description="The rewritten and improved content of the section.",
+    )
+
+
 class ReportStateInput(TypedDict):
     # Report topic
     topic: str
+    refine_iteration: int
 
 
 class ReportStateOutput(TypedDict):
@@ -33,12 +55,16 @@ class ReportStateOutput(TypedDict):
 class ReportState(TypedDict):
     # Report topic
     topic: str
+    # refine iteration
+    refine_iteration: int
+    # current refine iteration
+    curr_refine_iteration: int
     # Feedback on the report plan
     feedback_on_report_plan: Annotated[list, operator.add]
     # List of report sections
     sections: list[Section]
     # Send() API key
-    completed_sections: Annotated[list, operator.add]
+    completed_sections: Annotated[list, clearable_list_reducer]
     # String of any completed sections from research to write final sections
     report_sections_from_research: str
     # Final report

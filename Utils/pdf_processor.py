@@ -156,7 +156,18 @@ async def financial_report_metadata_extraction(model_name, file_name, content):
             )
         ]
     )
-    return output.tool_calls[0]["args"]
+    try:
+        return output.tool_calls[0]["args"]
+    except Exception as e:
+        output = await tool_model.ainvoke(
+            [SystemMessage(content=system_instructions.format(content=content))]
+            + [
+                HumanMessage(
+                    content="Please help me to summarize this table into description for doing RAG."
+                )
+            ]
+        )
+        return output.tool_calls[0]["args"]
 
 
 async def research_paper_metadata_extraction(model_name, file_name, content):
