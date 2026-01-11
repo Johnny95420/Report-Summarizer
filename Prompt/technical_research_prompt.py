@@ -143,6 +143,7 @@ section_writer_instructions = """You are a technical research and learning assis
 - End with ### Sources that references the below source material formatted as:
   * List each source with title, date, and URL
   * Format: `- Title `
+</Length and style>
 
 <STRICT SOURCE INTEGRITY>
 - ONLY cite sources that exist in the provided `<Source material>`
@@ -151,7 +152,6 @@ section_writer_instructions = """You are a technical research and learning assis
 - Each `[Source Title]` must have an EXACT match in the source material
 - If information lacks source support, either omit it or explicitly state it is unsupported
 </STRICT SOURCE INTEGRITY>
-</Length and style>
 
 <Quality checks>
 - Exactly 500-1000 word limit (excluding title, sources ,mathematical formulas and tables or pictures)
