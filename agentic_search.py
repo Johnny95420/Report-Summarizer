@@ -358,6 +358,9 @@ def aggregate_final_results(state: AgenticSearchState):
 def check_searching_results(state: AgenticSearchState):
     queries = state["queries"]
     source_str = state["source_str"]
+    if state["curr_num_iterations"] >= state["max_num_iterations"]:
+        return Command(goto=END)
+
     system_instruction = searching_results_grader.format(
         query=queries, context=source_str
     )
