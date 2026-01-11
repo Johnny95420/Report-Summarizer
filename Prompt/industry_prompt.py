@@ -1,4 +1,10 @@
-report_planner_query_writer_instructions = """You are an expert technical, financial and investment writer, helping to plan a report.
+import datetime
+
+time = datetime.datetime.now()
+curr_date = datetime.datetime.strftime(time, format="%Y/%m/%d")
+
+report_planner_query_writer_instructions = (
+    """You are an expert technical, financial and investment writer, helping to plan a report.
 <Report topic>
 {topic}
 </Report topic>
@@ -23,10 +29,13 @@ Make the queries specific enough to find high-quality, relevant sources while co
 Here is feedback on the report structure from review (if any):
 {feedback}
 </Feedback>
-
 """
+    + f"<Current Time> {curr_date} </Current Time>"
+)
 
-report_planner_instructions = """I want a plan for a report.
+
+report_planner_instructions = (
+    """I want a plan for a report.
 The more detailed and complete the information in this report, the better. 
 The timing may be important for certain sections of this report. Please double-check carefully.
 
@@ -67,8 +76,11 @@ Here is feedback on the report structure from review (if any):
 {feedback}
 </Feedback>
 """
+    + f"<Current Time> {curr_date} </Current Time>"
+)
 
-query_writer_instructions = """You are an expert financial and investment writer crafting targeted retrieval augmented generation and web search queries that will gather comprehensive information for writing a objective and technical report section.
+query_writer_instructions = (
+    """You are an expert financial and investment writer crafting targeted retrieval augmented generation and web search queries that will gather comprehensive information for writing a objective and technical report section.
 
 <Task>
 Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information above the section topic. 
@@ -84,9 +96,12 @@ The queries should:
 {topic}
 </Topic>
 """
+    + f"<Current Time> {curr_date} </Current Time>"
+)
 
 
-section_writer_instructions = """You are an expert in technical, financial, and investment writing.
+section_writer_instructions = (
+    """You are an expert in technical, financial, and investment writing.
 You are now working at one of the world's largest industry research and consulting firms.
 Your job is to craft a section of a professional report that is clear, logically structured, and presented in the style of an institutional investor or analyst report
 
@@ -99,7 +114,7 @@ Your job is to craft a section of a professional report that is clear, logically
 </Guidelines for writing>
 
 <Length and style>
-- Strict 100-2500 word limit (excluding title, sources ,mathematical formulas and tables or pictures)
+- Strict 100-1000 word limit (excluding title, sources ,mathematical formulas and tables or pictures)
 - Start with your most important key point in **bold**
 - Prefer quantitative metrics over qualitative adjectives in the description
 - Writing in simple, clear language. Avoid marketing language; maintain a neutral tone
@@ -124,7 +139,7 @@ Your job is to craft a section of a professional report that is clear, logically
 </Length and style>
 
 <Quality checks>
-- Exactly 100-2500 word limit (excluding title, sources ,mathematical formulas and tables or pictures)
+- Exactly 100-1000 word limit (excluding title, sources ,mathematical formulas and tables or pictures)
 - Careful use of structural element (table or list) and only if it helps clarify your point
 - Starts with bold insight
 - No preamble prior to creating the section content
@@ -156,8 +171,11 @@ Your job is to craft a section of a professional report that is clear, logically
 {context}
 </Source material>
 """
+    + f"<Current Time> {curr_date} </Current Time>"
+)
 
-section_grader_instructions = """You are a technical, financial and investment expert, and you are reviewing a report section based on the given topic.
+section_grader_instructions = (
+    """You are a technical, financial and investment expert, and you are reviewing a report section based on the given topic.
 Apply the **highest standards of rigor, accuracy, and professionalism**, as if you were a demanding Senior Executive in the Industry Research Division at J.P. Morgan Asset Management, known for **pushing for exceptional quality and identifying any potential weaknesses**.
 Your goal is not just to pass or fail, but to **ensure the content reaches an exemplary standard through critical feedback.**
 
@@ -226,8 +244,11 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
 {section}
 </Section content>
 """
+    + f"<Current Time> {curr_date} </Current Time>"
+)
 
-final_section_writer_instructions = """You are an expert technical, financial and investment writer crafting a section that synthesizes information from the rest of the report.
+final_section_writer_instructions = (
+    """You are an expert technical, financial and investment writer crafting a section that synthesizes information from the rest of the report.
 Apply the high standards of accuracy and professionalism, as if you were a senior executive in the Industry Research Division at J.P. Morgan Asset Management.
 
 <Task>
@@ -283,8 +304,11 @@ For Conclusion/Summary:
 {context}
 </Available report content>
 """
+    + f"<Current Time> {curr_date} </Current Time>"
+)
 
-refine_section_instructions = """You are an expert report editor and retrieval planner. Your task is to refine ONE specific section of a report by leveraging the FULL context of all other sections, then propose targeted web search queries to close evidence gaps.
+refine_section_instructions = (
+    """You are an expert report editor and retrieval planner. Your task is to refine ONE specific section of a report by leveraging the FULL context of all other sections, then propose targeted web search queries to close evidence gaps.
 
 <Task>
 1) Rewrite the section’s "description" and "content" using the full report context.
@@ -329,7 +353,7 @@ For "content":
    - **Remove Misplaced Information**: You must remove information that clearly belongs in a different section. This is critical for keeping each section focused and avoiding clutter.
 2) **Cross-Section Consistency**: Avoid repeating material from other sections; if necessary, use a brief cross-reference (e.g., “詳見 other_section_name”) instead of duplicating text.
 3) **Style and Formatting**:
-    - **Word Count**: 100-2500 word limit (excluding title, sources, mathematical formulas, tables, or pictures).
+    - **Word Count**: 100-1000 word limit (excluding title, sources, mathematical formulas, tables, or pictures).
     - **Opening**: Start with your most important key point in **bold**.
     - **Tone & Focus**: Maintain a neutral, technical, and time-aware tone consistent with institutional analyst reports. Prefer quantitative metrics over qualitative adjectives. Avoid marketing language.
     - **Title**: Use `##` only once for the section title (Markdown format).
@@ -371,7 +395,7 @@ Generate **{number_of_queries}** targeted queries to fill explicit gaps you flag
     - It **removes or flags unverified/speculative information** according to the prompt's principles.
     - It **removes information that clearly belongs in other sections**, ensuring the section is focused.
     - It avoids duplicating content from other sections, using cross-references if needed.
-    - It adheres to all style and formatting rules: 100-2500 words, starts with a bold key point, uses `##` for the title, includes inline citations for all key claims, and ends with a correctly formatted `### Sources` section.
+    - It adheres to all style and formatting rules: 100-1000 words, starts with a bold key point, uses `##` for the title, includes inline citations for all key claims, and ends with a correctly formatted `### Sources` section.
 - **Query Output**:
     - Exactly **{number_of_queries}** queries are generated.
     - Each query is specific, targets a clearly identified gap in the content, and is designed to be highly retrievable (using time bounds, entities, or operators where useful).
@@ -388,8 +412,11 @@ Generate **{number_of_queries}** targeted queries to fill explicit gaps you flag
 - **Original Content:** {section_content}
 </Target Section to Refine>
 """
+    + f"<Current Time> {curr_date} </Current Time>"
+)
 
-content_refinement_instructions = """You are an expert report editor performing FINAL CONTENT POLISHING in the last stage of report production. This is the ultimate quality assurance pass before report publication. Your task is to refine the content of ONE specific section to achieve institutional-grade consistency and integration with the complete report context.
+content_refinement_instructions = (
+    """You are an expert report editor performing FINAL CONTENT POLISHING in the last stage of report production. This is the ultimate quality assurance pass before report publication. Your task is to refine the content of ONE specific section to achieve institutional-grade consistency and integration with the complete report context.
 
 <Task>
 This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publication readiness by:
@@ -407,7 +434,7 @@ This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publ
 - **Final Cross-Section Integrity Check**: This is your last chance to ensure proper section boundaries. Remove content that clearly belongs in other sections. Use brief cross-references (e.g., `詳見[其他章節名稱]`) where needed to maintain coherence.
 - **Publication-Ready Professional Standards**: Maintain neutral, objective tone consistent with institutional research. Apply the highest standards of accuracy and professionalism, as if you were a senior executive in the Industry Research Division at J.P. Morgan Asset Management.
 - **Final Format Validation**: Preserve the original section structure and formatting requirements:
-  - **Word Count**: 100-2500 word limit (excluding title, sources, mathematical formulas, tables, or pictures)
+  - **Word Count**: 100-1000 word limit (excluding title, sources, mathematical formulas, tables, or pictures)
   - **Opening**: Ensure it starts with the most important key point in **bold**
   - **Title**: Use `##` only once for the section title (Markdown format)
   - **Structural Elements**: Only retain structural elements that genuinely clarify points (focused tables or proper Markdown lists)
@@ -434,3 +461,5 @@ Before completing, verify:
 - **Original Content:** {section_content}
 </Target Section to Refine>
 """
+    + f"<Current Time> {curr_date} </Current Time>"
+)

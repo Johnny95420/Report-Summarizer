@@ -2,6 +2,7 @@ import json
 import logging
 import math
 import os
+import time
 from copy import deepcopy
 from typing import List
 
@@ -9,11 +10,15 @@ import requests
 from langchain.retrievers import BM25Retriever
 from langchain.retrievers.ensemble import EnsembleRetriever
 from langchain.schema import Document
+from langchain_litellm import ChatLiteLLM
+from langchain_core.runnables import RunnableLambda
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.chat_models import ChatLiteLLM
+from requests.adapters import HTTPAdapter
+from requests.exceptions import ConnectionError, RequestException, Timeout
 from tavily import TavilyClient
+from urllib3.util.retry import Retry
 
 from State.state import Section
 
@@ -23,64 +28,107 @@ temp_files_path = os.environ.get("temp_dir", "./temp")
 os.makedirs(temp_files_path, exist_ok=True)
 tavily_client = TavilyClient()
 
+
+# Configure HTTP session with retry strategy
+def create_http_session():
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "POST"],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+http_session = create_http_session()
+
 logger = logging.getLogger("Utils")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.ERROR)
 
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
+console_handler.setLevel(logging.ERROR)
 
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
 
-# %%
+except_model_name = set(["o3-mini", "o4-mini", "gpt-5", "gpt-5-nano", "gpt-5-mini"])
 
 
 def call_llm(
     model_name: str, backup_model_name: str, prompt: List, tool=None, tool_choice=None
 ):
-    try:
-        temperature = 0
-        if model_name == "o3-mini" or model_name == "o4-mini":
-            temperature = 1
-        model = ChatLiteLLM(model=model_name, temperature=temperature)
-        if tool:
-            model = model.bind_tools(tools=tool, tool_choice=tool_choice)
-        response = model.invoke(prompt)
-    except Exception as e:
-        logger.error(e)
-        temperature = 0
-        if model_name == "o3-mini" or model_name == "o4-mini":
-            temperature = 1
-        model = ChatLiteLLM(model=backup_model_name, temperature=temperature)
-        if tool:
-            model = model.bind_tools(tools=tool, tool_choice=tool_choice)
-        response = model.invoke(prompt)
-    return response
+    temperature = 1 if model_name in except_model_name else 0.5
+    backup_temperature = 1 if backup_model_name in except_model_name else 0.5
+
+    primary = ChatLiteLLM(
+        model=model_name,
+        temperature=temperature,
+    )
+
+    if tool:
+        primary = primary.bind_tools(tools=tool, tool_choice=tool_choice)
+
+    def _validate_tool_calls(msg):
+        if tool and tool_choice == "required":
+            if not getattr(msg, "tool_calls", None):
+                raise ValueError("Required tool call missing")
+        if not (getattr(msg, "content", None) or getattr(msg, "tool_calls", None)):
+            raise ValueError("Empty model output")
+        return msg
+
+    validated_primary = primary | RunnableLambda(_validate_tool_calls)
+
+    backup = ChatLiteLLM(
+        model=backup_model_name,
+        temperature=backup_temperature,
+    )
+    if tool:
+        backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
+
+    model = validated_primary.with_fallbacks([backup])
+
+    return model.invoke(prompt)
 
 
 async def call_llm_async(
     model_name: str, backup_model_name: str, prompt: List, tool=None, tool_choice=None
 ):
-    try:
-        temperature = 0
-        if model_name == "o3-mini" or model_name == "o4-mini":
-            temperature = 1
-        model = ChatLiteLLM(model=model_name, temperature=temperature)
-        if tool:
-            model = model.bind_tools(tools=tool, tool_choice=tool_choice)
-        response = await model.ainvoke(prompt)
-    except Exception as e:
-        logger.error(e)
-        temperature = 0
-        if model_name == "o3-mini" or model_name == "o4-mini":
-            temperature = 1
-        model = ChatLiteLLM(model=backup_model_name, temperature=temperature)
-        if tool:
-            model = model.bind_tools(tools=tool, tool_choice=tool_choice)
-        response = await model.ainvoke(prompt)
-    return response
+    temperature = 1 if model_name in except_model_name else 0.5
+    backup_temperature = 1 if backup_model_name in except_model_name else 0.5
+
+    primary = ChatLiteLLM(
+        model=model_name,
+        temperature=temperature,
+    )
+
+    if tool:
+        primary = primary.bind_tools(tools=tool, tool_choice=tool_choice)
+
+    def _validate_tool_calls(msg):
+        if tool and tool_choice == "required":
+            if not getattr(msg, "tool_calls", None):
+                raise ValueError("Required tool call missing")
+        if not (getattr(msg, "content", None) or getattr(msg, "tool_calls", None)):
+            raise ValueError("Empty model output")
+        return msg
+
+    validated_primary = primary | RunnableLambda(_validate_tool_calls)
+
+    backup = ChatLiteLLM(
+        model=backup_model_name,
+        temperature=backup_temperature,
+    )
+    if tool:
+        backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
+
+    model = validated_primary.with_fallbacks([backup])
+    return await model.ainvoke(prompt)
 
 
 def track_expanded_context(
@@ -119,7 +167,7 @@ class ContentExtractor(object):
         self.k = k
         self.temp_dir = temp_dir
         # BAAI/bge-m3
-        embeddings = HuggingFaceEmbeddings(model_name="Qwen/Qwen3-Embedding-0.6B")
+        embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
         self.docs = [Document("None", metadata={"path": "None", "content": "None"})]
         self.vectorstore = Chroma.from_documents(
             documents=self.docs,
@@ -280,32 +328,105 @@ content_extractor = ContentExtractor()
 def selenium_api_search(search_queries, include_raw_content: bool):
     memo = set()
     search_docs = []
+
+    # Check if host and port are configured
+    if not host or not port:
+        logger.error("SEARCH_HOST and SEARCH_PORT environment variables are required")
+        return search_docs
+
     for query in search_queries:
-        output = requests.get(
-            f"http://{host}:{port}/search_and_crawl",
-            params={
-                "query": query,
-                "include_raw_content": include_raw_content,
-                "max_results": 3,
-                "timeout": 40,
-            },
-        )
-        output = json.loads(output.content)
+        max_retries = 3
+        retry_delay = 1
+
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Searching query: {query}, attempt {attempt + 1}")
+
+                output = http_session.get(
+                    f"http://{host}:{port}/search_and_crawl",
+                    params={
+                        "query": query,
+                        "include_raw_content": include_raw_content,
+                        "max_results": 5,
+                        "timeout": 600,
+                    },
+                    timeout=600,  # Give slightly more time than the service timeout
+                )
+                output.raise_for_status()  # Raise exception for HTTP errors
+
+                try:
+                    output_data = output.json()
+                except json.JSONDecodeError as e:
+                    logger.error(
+                        f"Failed to parse JSON response for query '{query}': {e}"
+                    )
+                    if attempt == max_retries - 1:
+                        # Add empty result on final attempt
+                        search_docs.append({"results": []})
+                    continue
+
+                break  # Success, exit retry loop
+
+            except Timeout as e:
+                logger.warning(
+                    f"Timeout for query '{query}' on attempt {attempt + 1}: {e}"
+                )
+                if attempt == max_retries - 1:
+                    logger.error(
+                        f"Max retries exceeded for query '{query}' due to timeout"
+                    )
+                    search_docs.append({"results": []})
+                    continue
+                time.sleep(retry_delay * (2**attempt))  # Exponential backoff
+
+            except ConnectionError as e:
+                logger.warning(
+                    f"Connection error for query '{query}' on attempt {attempt + 1}: {e}"
+                )
+                if attempt == max_retries - 1:
+                    logger.error(
+                        f"Max retries exceeded for query '{query}' due to connection error"
+                    )
+                    search_docs.append({"results": []})
+                    continue
+                time.sleep(retry_delay * (2**attempt))
+
+            except RequestException as e:
+                logger.error(f"Request failed for query '{query}': {e}")
+                if attempt == max_retries - 1:
+                    search_docs.append({"results": []})
+                    continue
+                time.sleep(retry_delay * (2**attempt))
+
+        else:
+            # If we reach here, the loop completed without breaking (all retries failed)
+            continue
+
+        # Process successful response
         if include_raw_content:
             large_files = []
-            for result in output["results"]:
+            for result in output_data.get("results", []):
                 result["title"] = result["title"].replace("/", "_")
                 if result.get("raw_content", "") is None:
                     continue
                 try:
+                    if len(result.get("raw_content", "")) >= 70000:
+                        result["raw_content"] = result["raw_content"][:20000]
+
                     if len(result.get("raw_content", "")) >= 5000:
                         file_path = f"{temp_files_path}/{result['title']}.txt"
-                        with open(file_path, "w") as f:
+                        with open(file_path, "w", encoding="utf-8") as f:
                             f.write(result["raw_content"])
                         large_files.append(file_path)
                         result["raw_content"] = ""
+                except (IOError, OSError) as e:
+                    logger.error(
+                        f"Failed to write file for result '{result['title']}': {e}"
+                    )
                 except Exception as e:
-                    logger.error(e)
+                    logger.error(
+                        f"Unexpected error processing result '{result['title']}': {e}"
+                    )
 
             if len(large_files) > 0:
                 content_extractor.update(large_files)
@@ -313,7 +434,7 @@ def selenium_api_search(search_queries, include_raw_content: bool):
                 for idx, results in enumerate(search_results):
                     if results.metadata["content"] not in memo:
                         memo.add(results.metadata["content"])
-                        output["results"].append(
+                        output_data["results"].append(
                             {
                                 "url": f"{results.metadata['path']}_part{idx}",
                                 "title": results.metadata["path"],
@@ -321,7 +442,7 @@ def selenium_api_search(search_queries, include_raw_content: bool):
                                 "raw_content": results.metadata["content"],
                             }
                         )
-        search_docs.append(output)
+        search_docs.append(output_data)
     return search_docs
 
 
