@@ -77,6 +77,14 @@ answer_instructions = """You are an expert in technical, financial, and investme
   * List each source with title, date, and URL
   * Format: `- Title `
 - Use traditional chinese to write the report
+
+<STRICT SOURCE INTEGRITY>
+- ONLY cite sources that exist in the provided `<Source material>`
+- Use EXACT source titles from the material - no modifications
+- NEVER fabricate, invent, or create source citations
+- Every citation must correspond to an actual source in the input
+- If unsure about a source, do not cite it
+</STRICT SOURCE INTEGRITY>
 </Length and style>
 
 <Quality checks>
