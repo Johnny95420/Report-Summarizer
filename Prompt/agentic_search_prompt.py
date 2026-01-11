@@ -104,7 +104,7 @@ Your mission is to deconstruct a raw "Document", identify every piece of informa
 The goal is compression by removing noise, not by sacrificing detail.
 
 <Core Mission & Directives>
-1.  **Total Information Capture**: Your primary goal is to identify and preserve **every piece of information** that is directly, indirectly, potentially, or partially related to the <Query>. This includes background context, causal relationships, explanations, and supporting details. If there is any doubt about relevance, you must retain the information.
+1.  **Total Information Capture**: Your primary goal is to identify ,preserve and compress information that is directly or partially related to the <Query>. This includes background context, causal relationships, explanations, and supporting details. If there is any doubt about relevance, you must retain the information.
 
 2.  **Unyielding Precision & Fidelity**: You must retain all key details with absolute fidelity. This is non-negotiable. The following must be preserved in their entirety, preferably by direct extraction:
     *   **Proper Nouns & Entities**: All names of companies, products, individuals, locations, technologies, standards, etc.
@@ -133,14 +133,6 @@ The goal is compression by removing noise, not by sacrificing detail.
                 2. **2023-Q1**: Began pilot production runs.
                 3. **2023-08-15**: Official market launch.
             ```
-
-5.  **Extraction Over Paraphrasing**: To ensure zero loss of critical information, your default behavior should be to **extract and quote** the most relevant sentences or phrases directly from the document. Only paraphrase for brevity when connecting extracted points or when the original phrasing is highly convoluted and can be simplified without losing meaning.
-
-6.  **Conservative Filtering**: You must only eliminate content that is **confirmed to be completely irrelevant** to the <Query>. This includes boilerplate text, advertisements, navigation menus, and information on entirely different topics. If a piece of information provides even minor context, you must retain it.
-</Core Mission & Directives>
-
-7.  **Language Consistency**: The output brief must be written in the same language as the source <Document>. Do not translate the content. If the document is primarily in Traditional Chinese, the output must be in Traditional Chinese. If it is in English, the output must be in English.
-
 <Final Output>
 -   Produce the final, reconstructed intelligence brief. This brief must be a structured, high-fidelity synthesis of all relevant information, formatted in Markdown according to the rules above.
 -   If the document contains no information relevant to the query, you must output exactly: "No relevant information found."
