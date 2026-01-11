@@ -394,23 +394,31 @@ def write_section(
     logger.info(
         f"Start grade section content of topic:{section.name}, Search iteration:{state['search_iterations']}"
     )
-    feedback = call_llm(
-        VERIFY_MODEL_NAME,
-        BACKUP_VERIFY_MODEL_NAME,
-        [SystemMessage(content=section_grader_instructions_formatted)]
-        + [
-            HumanMessage(
-                content="Grade the report and consider follow-up questions for missing information"
+    retry = 0
+    flag = False
+    while retry < 5 and not flag:
+        try:
+            feedback = call_llm(
+                VERIFY_MODEL_NAME,
+                BACKUP_VERIFY_MODEL_NAME,
+                [SystemMessage(content=section_grader_instructions_formatted)]
+                + [
+                    HumanMessage(
+                        content="Grade the report and consider follow-up questions for missing information.**Remember to use tool to output suitable format**"
+                    )
+                ],
+                tool=[feedback_formatter],
+                tool_choice="required",
             )
-        ],
-        tool=[feedback_formatter],
-        tool_choice="required",
-    )
-    logger.info(
-        f"Start grade section content of topic:{section.name}, Search iteration:{state['search_iterations']}"
-    )
-    # call_llm with tool_choice="required" now handles all retries automatically
-    feedback = feedback.tool_calls[0]["args"]
+            logger.info(
+                f"Start grade section content of topic:{section.name}, Search iteration:{state['search_iterations']}"
+            )
+            # call_llm with tool_choice="required" now handles all retries automatically
+            feedback = feedback.tool_calls[0]["args"]
+            flag = True
+        except Exception as e:
+            logger.error(e)
+            retry += 1
 
     if feedback["grade"] == "pass":
         logger.info(f"Section:{section.name} pass model check or reach search depth.")
@@ -511,37 +519,48 @@ async def refine_sections(state: ReportState, config: RunnableConfig):
             full_context=full_context,
             number_of_queries=number_of_queries,
         )
+
+        retry = 0
+        flag = False
         context = [SystemMessage(content=system_instructions)] + [
             HumanMessage(
-                content="Refine the section based on the full report context and give me new queries.Remember to give me refined_description, refined_content and new_queries in formatted outputs."
+                content="""Refine the section based on the full report context and give me new queries.
+                        **YOU MUST USE TOOL and give me**
+                        - refined_description
+                        - refined_content
+                        - new_queries 
+                        **in formatted outputs**."""
             )
         ]
-        refined_output = await call_llm_async(
-            WRITER_MODEL_NAME,
-            BACKUP_WRITER_MODEL_NAME,
-            context,
-            tool=[refine_section_formatter],
-            tool_choice="required",
-        )
-        try:
-            refined_section_data = refined_output.tool_calls[0]["args"]
-            section.description += "\n\n" + refined_section_data["refined_description"]
-            section.content = refined_section_data["refined_content"]
-            new_queries = refined_section_data["new_queries"]
+        while retry < 5 and not flag:
+            if retry == 0:
+                refined_output = await call_llm_async(
+                    WRITER_MODEL_NAME,
+                    BACKUP_WRITER_MODEL_NAME,
+                    context,
+                    tool=[refine_section_formatter],
+                    tool_choice="required",
+                )
+            else:
+                refined_output = await call_llm_async(
+                    VERIFY_MODEL_NAME,
+                    BACKUP_VERIFY_MODEL_NAME,
+                    context,
+                    tool=[refine_section_formatter],
+                    tool_choice="required",
+                )
+            try:
+                refined_section_data = refined_output.tool_calls[0]["args"]
+                section.description += (
+                    "\n\n" + refined_section_data["refined_description"]
+                )
+                section.content = refined_section_data["refined_content"]
+                new_queries = refined_section_data["new_queries"]
+                flag = True
 
-        except Exception as e:
-            logger.error(e)
-            refined_output = await call_llm_async(
-                WRITER_MODEL_NAME,
-                BACKUP_WRITER_MODEL_NAME,
-                context,
-                tool=[refine_section_formatter],
-                tool_choice="required",
-            )
-            refined_section_data = refined_output.tool_calls[0]["args"]
-            section.description += "\n\n" + refined_section_data["refined_description"]
-            section.content = refined_section_data["refined_content"]
-            new_queries = refined_section_data["new_queries"]
+            except Exception as e:
+                logger.error(e)
+                retry += 1
 
         return [section, new_queries]
 
