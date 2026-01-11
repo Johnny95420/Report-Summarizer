@@ -131,6 +131,42 @@ Your job is to craft a section of a professional report that is clear, logically
     - Use `*` or `-` for unordered lists
     - Use `1.` for ordered lists
     - Ensure proper indentation and spacing
+
+<STRICT SOURCE INTEGRITY RULES - ABSOLUTELY FORBIDDEN TO VIOLATE>
+1. **ONLY CITE PROVIDED SOURCES**: You MUST ONLY cite sources that are explicitly provided in the `<Source material>`.
+   - It is ABSOLUTELY FORBIDDEN to create, fabricate, or hallucinate any source title, URL, date, or metadata
+   - If information is not supported by the provided sources, do not cite it. Either omit the claim or explicitly state it lacks source support
+   - Every inline citation `[Source Title]` must match EXACTLY with a source title appearing in the `<Source material>`
+
+2. **EXACT TITLE MATCHING REQUIRED**:
+   - When citing, you MUST use the **EXACT** source title as it appears in the `<Source material>`
+   - Do NOT shorten, paraphrase, translate, or modify source titles
+   - The citation `[Source Title]` in your text MUST have an identical match in the source material list
+
+3. **SOURCE-CONTENT CORRESPONDENCE**:
+   - Every claim you make MUST be directly supported by the cited source
+   - Do NOT cite a source for information it does not contain
+   - When synthesizing information from multiple sources, you MUST cite ALL sources that contribute to that synthesis
+
+4. **PROHIBITED CITATION PRACTICES**:
+   - NEVER use vague, untraceable generic descriptions as source citations, such as "[News Report]", "[Company Website]", or "[Industry Analysis]"
+   - You MUST use specific, identifiable source titles (e.g., media name + date + title keywords, or company/institution name + document type)
+   - Trustworthy sources should have the following characteristics:
+     * Clear media/platform name (e.g., news media, financial professional websites, official release platforms)
+     * Reporter byline or clear data source attribution
+     * Traceable publication date
+     * Complete URL for verification
+   - Avoid citing: anonymous blogs, social media personal posts, reposted content lacking source attribution, content with unidentifiable origins
+   - NEVER create URL-like references that do not exist in the source material
+   - NEVER fabricate dates or add "accessed on" information not provided
+   - If a source in the material lacks a title or date, mark it as "[Source without title]" rather than fabricating one
+
+5. **SOURCE LIST INTEGRITY**:
+   - The `### Sources` section MUST ONLY include sources that (1) exist in the provided `<Source material>` AND (2) were actually cited in your content
+   - Do NOT add uncited sources to the source list
+   - Do NOT modify the provided URL or metadata when listing sources
+</STRICT SOURCE INTEGRITY RULES>
+
 - **Inline Citations**: For any key data, statistics, or direct claims, you must provide an inline citation immediately after the statement. Use the format `[Source Title]`. If a statement synthesizes information from multiple sources, cite all of them, e.g., `[Source Title 1][Source Title 2]`. All cited sources must also be listed in the final `### Sources` section.
 - End with `### Sources` that references the below source material formatted as:
   * List each source with title, date, and URL
@@ -191,6 +227,11 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
         * **Financial Correctness:** Are financial data, models, assumptions, and interpretations sound and clearly articulated? Are calculations accurate and methodologies appropriate? Are financial concepts applied correctly and with necessary nuance?
         * **Investment Analysis Depth:** Does the analysis go **significantly beyond surface-level observations**? Does it critically assess risks, opportunities, valuation, competitive dynamics, and potential impacts with **well-supported arguments, diverse evidence, and insightful perspectives**? Is there a clear, defensible investment thesis or implication? Does it consider counterarguments or alternative scenarios?
         * **Quantitative Metrics & Data Support:** Does the section effectively use **relevant and sufficient** quantitative data, benchmarks, and metrics? Is data clearly presented, thoroughly analyzed, and meaningfully contextualized to support claims? Are sources credible and appropriately cited? Is the **significance and limitation of the data discussed**?
+        * **Source Citation Integrity:**
+          * Does EVERY inline citation `[Source Title]` correspond to a source that ACTUALLY EXISTS in the source material?
+          * Are source titles used EXACTLY as provided (not paraphrased, shortened, or invented)?
+          * Is there evidence of FABRICATED or HALLUCINATED sources?
+          * If ANY citation points to a non-existent source, this is a CRITICAL FAILURE requiring immediate follow-up queries to verify information
 
     *Targeted Search Queries for Improvement (Mandatory if any weaknesses are identified or if the section is not 'exemplary'):*
         * Based on the **explicitly identified weaknesses, gaps, or areas needing more depth**, generate highly specific search queries designed to gather the exact missing information or to deepen the underdeveloped aspects of the analysis.
@@ -326,6 +367,17 @@ refine_section_instructions = (
 - Prefer quantitative detail when suitable (KPI, YoY/HoH, penetration, valuation multiples, capacity, ASP, users, conversion, margins, etc.).
 - **Cross-Section Integrity**: Strictly maintain logical boundaries between sections. Information must be placed in its most appropriate section. When refining, **remove content that belongs in other sections** and avoid duplicating material. Use brief cross-references (e.g., `詳見[其他章節名稱]`) where needed.
 - **Do not delete** any existing source markers in the original content (e.g., [來源], [Source]).
+
+<STRICT SOURCE CITATION INTEGRITY>
+- **ABSOLUTE PROHIBITION ON SOURCE FABRICATION**:
+  * You are ABSOLUTELY FORBIDDEN from creating, inventing, or hallucinating any source citation
+  * ALL citations (including existing `[來源]`, `[Source]`) MUST correspond to sources that appear in the `<Full Report Context>`
+  * When adding new citations, use ONLY source titles that EXACTLY MATCH sources in the provided context
+  * NEVER modify existing citation markers to point to non-existent sources
+  * If you cannot verify a source's existence in the context, REMOVE the claim rather than fabricating a citation
+  * The title in any `[Source Title]` citation MUST appear verbatim in the source material
+</STRICT SOURCE CITATION INTEGRITY>
+
 - Maintain a professional, neutral, and objective tone consistent with institutional research.
 </Rigorous Principles>
 
@@ -430,6 +482,22 @@ This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publ
 <Critical Final-Stage Principles>
 - Write the refined content in **Traditional Chinese**.
 - **FINAL STAGE ZERO TOLERANCE FOR HALLUCINATION**: This is the last opportunity to catch errors. Only use information explicitly supported by the original content and full report context. Absolutely no new facts, numbers, or claims may be added. Any unsupported information must be removed or flagged.
+
+<SOURCE VALIDATION REQUIREMENTS>
+- **Citation Source Verification**: For EVERY citation `[Source Title]` in the content:
+  * Verify that the EXACT source title exists in the `<Full Report Context>`
+  * If a cited source does NOT exist in the context, you MUST either:
+    a) Find the correct source title from context and update the citation, OR
+    b) Completely remove the unsupported claim
+  * NEVER leave a citation pointing to a non-existent source
+  * NEVER fabricate a new source to support a claim
+
+- **Source Metadata Accuracy**:
+  * Use EXACT titles from source material - no paraphrasing or shortening
+  * Preserve original URLs exactly as provided
+  * Use original dates from source material without modification
+</SOURCE VALIDATION REQUIREMENTS>
+
 - **Comprehensive Source Validation**: Maintain and verify all existing source markers (e.g., [來源], [Source]) from the original content. Ensure all citations are properly formatted and referenced.
 - **Final Cross-Section Integrity Check**: This is your last chance to ensure proper section boundaries. Remove content that clearly belongs in other sections. Use brief cross-references (e.g., `詳見[其他章節名稱]`) where needed to maintain coherence.
 - **Publication-Ready Professional Standards**: Maintain neutral, objective tone consistent with institutional research. Apply the highest standards of accuracy and professionalism, as if you were a senior executive in the Industry Research Division at J.P. Morgan Asset Management.

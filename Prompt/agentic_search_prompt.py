@@ -113,6 +113,22 @@ The goal is compression by removing noise, not by sacrificing detail.
     *   **Quantitative Data**: All numbers, statistics, percentages, monetary values, financial figures, and measurements.
     *   **Key Descriptive Statements**: Crucial sentences that provide qualitative descriptions, expert opinions, forward-looking statements, or critical analysis directly related to the query.
 
+<CRITICAL SOURCE METADATA PRESERVATION>
+- **ABSOLUTE REQUIREMENT**: You MUST preserve ALL source metadata EXACTLY as provided in the input document:
+  * Source Title: Use the EXACT title from the document. NEVER modify, shorten, or paraphrase
+  * URL: Preserve the EXACT URL. NEVER change or fabricate URLs
+  * Date: Preserve the original publication date EXACTLY as provided
+
+- **FORBIDDEN ACTIONS**:
+  * NEVER create or invent source titles
+  * NEVER generate vague, untraceable generic titles, such as "News Article" or "Industry Report"
+  * You MUST preserve specific, identifiable source titles (e.g., "Reuters 2024-12-15 Report", "Company Earnings Call Transcript")
+  * NEVER modify URLs or create placeholder URLs
+  * If metadata is missing in the source, mark it as "[Not provided]" rather than fabricating
+
+- **OUTPUT FORMAT REQUIREMENT**: Every piece of information in your output MUST be traceable to its original source. When grouping information by theme, maintain clear source attribution to the original document's title
+</CRITICAL SOURCE METADATA PRESERVATION>
+
 3.  **Content Quality Assurance & Format Cleanup**: Before processing information, you must perform comprehensive content cleaning:
     *   **Remove Irrelevant Web Elements**: Eliminate website navigation menus, footers, headers, sidebar content, advertisement blocks, cookie notices, social media widgets, and unrelated promotional content.
     *   **Filter Out Boilerplate Text**: Remove standard disclaimers, copyright notices, "About Us" sections, contact information, and generic website templates that do not contribute to the query.

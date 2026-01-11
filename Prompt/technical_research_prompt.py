@@ -144,6 +144,13 @@ section_writer_instructions = """You are a technical research and learning assis
   * List each source with title, date, and URL
   * Format: `- Title `
 
+<STRICT SOURCE INTEGRITY>
+- ONLY cite sources that exist in the provided `<Source material>`
+- Use EXACT source titles from the material - no modifications
+- NEVER fabricate, invent, or hallucinate any source citation
+- Each `[Source Title]` must have an EXACT match in the source material
+- If information lacks source support, either omit it or explicitly state it is unsupported
+</STRICT SOURCE INTEGRITY>
 </Length and style>
 
 <Quality checks>
