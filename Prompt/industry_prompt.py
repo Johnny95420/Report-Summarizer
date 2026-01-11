@@ -131,8 +131,9 @@ Your job is to craft a section of a professional report that is clear, logically
     - Use `*` or `-` for unordered lists
     - Use `1.` for ordered lists
     - Ensure proper indentation and spacing
+</Length and style>
 
-<STRICT SOURCE INTEGRITY RULES - ABSOLUTELY FORBIDDEN TO VIOLATE>
+<STRICT SOURCE INTEGRITY RULES>
 1. **ONLY CITE PROVIDED SOURCES**: You MUST ONLY cite sources that are explicitly provided in the `<Source material>`.
    - It is ABSOLUTELY FORBIDDEN to create, fabricate, or hallucinate any source title, URL, date, or metadata
    - If information is not supported by the provided sources, do not cite it. Either omit the claim or explicitly state it lacks source support
@@ -167,12 +168,13 @@ Your job is to craft a section of a professional report that is clear, logically
    - Do NOT modify the provided URL or metadata when listing sources
 </STRICT SOURCE INTEGRITY RULES>
 
+<Citation and Language Guidelines>
 - **Inline Citations**: For any key data, statistics, or direct claims, you must provide an inline citation immediately after the statement. Use the format `[Source Title]`. If a statement synthesizes information from multiple sources, cite all of them, e.g., `[Source Title 1][Source Title 2]`. All cited sources must also be listed in the final `### Sources` section.
 - End with `### Sources` that references the below source material formatted as:
   * List each source with title, date, and URL
   * Format: `- Title `
 - Use traditional chinese to write the report
-</Length and style>
+</Citation and Language Guidelines>
 
 <Quality checks>
 - Exactly 100-1000 word limit (excluding title, sources ,mathematical formulas and tables or pictures)
@@ -367,6 +369,7 @@ refine_section_instructions = (
 - Prefer quantitative detail when suitable (KPI, YoY/HoH, penetration, valuation multiples, capacity, ASP, users, conversion, margins, etc.).
 - **Cross-Section Integrity**: Strictly maintain logical boundaries between sections. Information must be placed in its most appropriate section. When refining, **remove content that belongs in other sections** and avoid duplicating material. Use brief cross-references (e.g., `詳見[其他章節名稱]`) where needed.
 - **Do not delete** any existing source markers in the original content (e.g., [來源], [Source]).
+</Rigorous Principles>
 
 <STRICT SOURCE CITATION INTEGRITY>
 - **ABSOLUTE PROHIBITION ON SOURCE FABRICATION**:
@@ -378,8 +381,9 @@ refine_section_instructions = (
   * The title in any `[Source Title]` citation MUST appear verbatim in the source material
 </STRICT SOURCE CITATION INTEGRITY>
 
+<Tone and Style Guidelines>
 - Maintain a professional, neutral, and objective tone consistent with institutional research.
-</Rigorous Principles>
+</Tone and Style Guidelines>
 
 <Description Requirements>
 For "description":
@@ -482,6 +486,7 @@ This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publ
 <Critical Final-Stage Principles>
 - Write the refined content in **Traditional Chinese**.
 - **FINAL STAGE ZERO TOLERANCE FOR HALLUCINATION**: This is the last opportunity to catch errors. Only use information explicitly supported by the original content and full report context. Absolutely no new facts, numbers, or claims may be added. Any unsupported information must be removed or flagged.
+</Critical Final-Stage Principles>
 
 <SOURCE VALIDATION REQUIREMENTS>
 - **Citation Source Verification**: For EVERY citation `[Source Title]` in the content:
@@ -498,6 +503,7 @@ This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publ
   * Use original dates from source material without modification
 </SOURCE VALIDATION REQUIREMENTS>
 
+<Final Content Quality Requirements>
 - **Comprehensive Source Validation**: Maintain and verify all existing source markers (e.g., [來源], [Source]) from the original content. Ensure all citations are properly formatted and referenced.
 - **Final Cross-Section Integrity Check**: This is your last chance to ensure proper section boundaries. Remove content that clearly belongs in other sections. Use brief cross-references (e.g., `詳見[其他章節名稱]`) where needed to maintain coherence.
 - **Publication-Ready Professional Standards**: Maintain neutral, objective tone consistent with institutional research. Apply the highest standards of accuracy and professionalism, as if you were a senior executive in the Industry Research Division at J.P. Morgan Asset Management.
@@ -508,7 +514,7 @@ This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publ
   - **Structural Elements**: Only retain structural elements that genuinely clarify points (focused tables or proper Markdown lists)
   - **Inline Citations**: Verify all key data, statistics, and claims have immediate inline citations (e.g., `[Source Title]`)
   - **Sources Section**: Confirm it ends with properly formatted `### Sources` section
-</Critical Final-Stage Principles>
+</Final Content Quality Requirements>
 
 <Final Quality Validation>
 Before completing, verify:
