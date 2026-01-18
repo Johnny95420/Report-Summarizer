@@ -1,4 +1,24 @@
+"""
+PROMPT VERSION: 2.0
+LAST UPDATED: 2025-01-18
+CHANGES:
+- v2.0: Added query format optimization (keyword-based, 3-8 tokens)
+- v2.0: Imported shared modules (language_rules, query_format, source_integrity)
+- v2.0: Added ANTI-NARROWING PRINCIPLES to refine_section_instructions
+- v1.9: Added strict source integrity rules
+- v1.8: Initial version
+"""
+
 import datetime
+
+from .shared.language_rules import LANGUAGE_RULES_FULL, LANGUAGE_RULES_SHORT
+from .shared.query_format import QUERY_FORMAT_INSTRUCTION_SHORT, QUERY_FORMAT_EXAMPLES
+from .shared.source_integrity import (
+    SOURCE_INTEGRITY_RULES_FULL,
+    SOURCE_INTEGRITY_RULES_SHORT,
+    SOURCE_VALIDATION_REQUIREMENTS,
+    HALLUCINATION_DETECTION_RULES,
+)
 
 time = datetime.datetime.now()
 curr_date = datetime.datetime.strftime(time, format="%Y/%m/%d")
@@ -80,20 +100,23 @@ Here is feedback on the report structure from review (if any):
 )
 
 query_writer_instructions = (
-    """You are an expert financial and investment writer crafting targeted retrieval augmented generation and web search queries that will gather comprehensive information for writing a objective and technical report section.
+    f"""You are an expert financial and investment writer crafting targeted web search queries for report research.
 
 <Task>
-Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information above the section topic. 
-
-The queries should:
-1. Be related to the topic 
-2. Examine different aspects of the topic
-3. If the topic is only related to Taiwan, use Traditional Chinese queries only.
-4. If the topic is related to Europe, America, the broader Asia-Pacific region, or globally, use English queries.
+Your goal is to generate {{number_of_queries}} search queries that will help gather comprehensive information for the section topic.
 </Task>
 
+{QUERY_FORMAT_INSTRUCTION_SHORT}
+
+<Query Strategy>
+- Generate queries that examine different aspects of the topic
+- Use layered approach: broad → focused → financial/technical
+- Max 8 tokens per query
+
+{LANGUAGE_RULES_SHORT}
+
 <Topic>
-{topic}
+{{topic}}
 </Topic>
 """
     + f"<Current Time> {curr_date} </Current Time>"
@@ -237,6 +260,10 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
 
     *Targeted Search Queries for Improvement (Mandatory if any weaknesses are identified or if the section is not 'exemplary'):*
         * Based on the **explicitly identified weaknesses, gaps, or areas needing more depth**, generate highly specific search queries designed to gather the exact missing information or to deepen the underdeveloped aspects of the analysis.
+        * **Query Format Requirements**:
+          - Use KEYWORD format, not sentences (3-8 tokens max)
+          - Format: [Entity] [Concept] [Time?]
+          - Examples: "台積電 N3 良率 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
         * These queries should be phrases suitable for effective web searching (e.g., for academic databases, financial news, industry reports); avoid being overly declarative or too broad.
 
 2.  **Hypothetical & Exploratory Queries for Broader Context (Generate these always):**
@@ -266,6 +293,11 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
     *   **Review History:** Before generating any new queries, you must carefully review the `Queries History`.
     *   **Avoid Semantic Duplication:** Strictly prohibit generating queries that are semantically identical or highly similar to any existing queries in the history.
     *   **Deepen, Don't Repeat:** If a topic requires more information, formulate a new query that approaches it from a different angle, at a deeper level, or investigates its root causes, rather than simply repeating or slightly rephrasing an old query. The goal is to uncover new information, not to retrieve the same content again.
+
+6.  **Query Conciseness and Search Effectiveness:**
+    * **Keep It Concise**: The Query should not be overly long.
+    * **Avoid Over-Description:** Do not make the Query excessively descriptive or narrative.
+    * **Optimize for Google Search:** Since the Query will be sent to Google Search, it must be crafted to maximize both recall and precision in the returned results.
 
 6.  **Query Prioritization and Limit:**
     *   **Total Limit:** Generate a maximum of 3 queries in total.
@@ -354,9 +386,25 @@ refine_section_instructions = (
     """You are an expert report editor and retrieval planner. Your task is to refine ONE specific section of a report by leveraging the FULL context of all other sections, then propose targeted web search queries to close evidence gaps.
 
 <Task>
-1) Rewrite the section’s "description" and "content" using the full report context.
+1) Rewrite the section's "description" and "content" using the full report context.
 2) Produce "queries" to obtain missing facts, metrics, or corroboration.
 </Task>
+
+<ANTI-NARROWING PRINCIPLES>
+- **Dimension Preservation**: When refining descriptions, you MUST preserve ALL analytical dimensions from the original
+  * Examples of dimensions: market background, financial metrics, competitive landscape, risk factors, technical specifications
+  * DO NOT reduce multi-dimensional analysis to single focus
+
+- **Deepen, Don't Replace**: Your refinement should ADD specificity to existing dimensions, not remove them
+  * ❌ Bad: "Focus only on N3 yield improvement"
+  * ✅ Good: "Analyze N3 yield trends (historical + current), impact on gross margins, customer adoption rates, and competitive comparison with Samsung GAA"
+
+- **Missing Dimension Detection**: Identify dimensions that are MISSING from the original and ADD them
+  * If a section on "competitive analysis" only mentions one competitor, add queries for others
+  * If "risk factors" are absent, explicitly add them
+
+- **Output Format**: For refined_description, output ONLY the additions - do not repeat the original
+</ANTI-NARROWING PRINCIPLES>
 
 <Rigorous Principles>
 - Write the final description and content in **Traditional Chinese**.
@@ -425,15 +473,17 @@ For "content":
 
 
 <Query Requirements>
-Generate **{number_of_queries}** targeted queries to fill explicit gaps you flagged in the content and to deepen analysis:
-1) Each query must map to a concrete missing data point, validation need, or analytical deepening you identified.
-2) Cover multiple angles as needed: statistics, regulations/policy, financial disclosures, industry reports, technical specs/standards, benchmarks/peers, and risk events (as applicable).
-3) Language rules:
+Generate **{{number_of_queries}}** targeted queries to fill explicit gaps you flagged in the content and to deepen analysis:
+1) **Query Format**: Use KEYWORD format, not sentences (3-8 tokens max)
+   - Format: [Entity] [Concept] [Time?]
+   - Examples: "台積電 N3 良率 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
+2) Each query must map to a concrete missing data point, validation need, or analytical deepening you identified.
+3) Cover multiple angles as needed: statistics, regulations/policy, financial disclosures, industry reports, technical specs/standards, benchmarks/peers, and risk events (as applicable).
+4) Language rules:
    - If the topic pertains **only to Taiwan**, use **Traditional Chinese** queries.
    - If it concerns **Europe/US/APAC or global** scope, use **English** queries.
-4) Make queries highly retrievable: include time bounds (e.g., 2019..2025, "Q2 2024"), key entities (companies/products/locations/standards), and operators when useful (e.g., site:, filetype:pdf, intitle:).
-5) No semantic duplicates; each query should solve a different gap or approach.
-6) Avoid leading phrasing; write search-ready strings rather than conclusions.
+5) Make queries highly retrievable: include time bounds (e.g., 2019..2025, "Q2 2024"), key entities (companies/products/locations/standards), and operators when useful (e.g., site:, filetype:pdf, intitle:).
+6) No semantic duplicates; each query should solve a different gap or approach.
 </Query Requirements>
 
 
