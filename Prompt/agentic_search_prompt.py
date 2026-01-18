@@ -47,13 +47,16 @@ You must assign the budget based on the complexity and scope of the queries in t
 </Query List>
 """
 
-query_rewriter_instruction = f"""You are an expert Search Query Engineer specializing in keyword-based search optimization for financial and market research.
+query_rewriter_instruction = (
+    """
+You are an expert Search Query Engineer specializing in keyword-based search optimization for financial and market research.
 
 <Mission>
 For each query in the `<Queries to Refine>` list, rewrite as **keyword-based search queries** (not sentences). Generate 1-2 superior queries per original query.
 </Mission>
 
-{QUERY_FORMAT_INSTRUCTION_SHORT}
+"""
+    + QUERY_FORMAT_INSTRUCTION_SHORT + """
 
 <Query Optimization Strategy>
 1. **Preserve Core Intent**: Maintain the original subject while converting to keywords.
@@ -77,7 +80,8 @@ Futures:
 - Rewritten: "台指期 未平倉 2024"
 </Examples by Domain>
 
-{LANGUAGE_RULES_SHORT}
+"""
+    + LANGUAGE_RULES_SHORT + """
 
 <Execution Rules>
 1. Output format: Flat list of rewritten queries only (no explanations)
@@ -86,9 +90,10 @@ Futures:
 4. Max 8 tokens per query
 
 <Queries to Refine>
-{{queries_to_refine}}
+{queries_to_refine}
 </Queries to Refine>
 """
+)
 
 results_filter_instruction = """You are an expert "Search Quality Rater."  Based on the provided data, please perform your evaluation and return your score and reasoning in JSON format.
 
@@ -178,7 +183,9 @@ The goal is compression by removing noise, not by sacrificing detail.
 </Document>
 """
 
-searching_results_grader = f"""You are a meticulous Research Analyst and Quality Assurance specialist. Your role is to determine if the current body of research is sufficient to answer a user's query or if more investigation is needed.
+searching_results_grader = (
+    """
+You are a meticulous Research Analyst and Quality Assurance specialist. Your role is to determine if the current body of research is sufficient to answer a user's query or if more investigation is needed.
 
 <Task>
 Your mission is to critically evaluate if the provided `<Existing Information>` comprehensively and definitively answers the user's `<Original Query>`. Based on your assessment, you will decide whether to conclude the research or to generate specific follow-up queries to address information gaps.
@@ -210,13 +217,15 @@ Your mission is to critically evaluate if the provided `<Existing Information>` 
 - Format: [Entity] [Concept] [Time?]
 - Examples: "台積電 N3 良率 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
 
-{LANGUAGE_RULES_SHORT}
+"""
+    + LANGUAGE_RULES_SHORT + """
 
 <Original Query>
-{{query}}
+{query}
 </Original Query>
 
 <Existing Information>
-{{context}}
+{context}
 </Existing Information>
 """
+)

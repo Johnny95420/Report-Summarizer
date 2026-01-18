@@ -94,23 +94,26 @@ Here is feedback on the report structure from review (if any):
 )
 
 query_writer_instructions = (
-    f"""You are an expert financial and investment writer crafting targeted web search queries for report research.
+    """
+You are an expert financial and investment writer crafting targeted web search queries for report research.
 
 <Task>
-Your goal is to generate {{number_of_queries}} search queries that will help gather comprehensive information for the section topic.
+Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information for the section topic.
 </Task>
 
-{QUERY_FORMAT_INSTRUCTION_SHORT}
+"""
+    + QUERY_FORMAT_INSTRUCTION_SHORT + """
 
 <Query Strategy>
 - Generate queries that examine different aspects of the topic
 - Use layered approach: broad → focused → financial/technical
 - Max 8 tokens per query
 
-{LANGUAGE_RULES_SHORT}
+"""
+    + LANGUAGE_RULES_SHORT + """
 
 <Topic>
-{{topic}}
+{topic}
 </Topic>
 """
     + f"<Current Time> {curr_date} </Current Time>"
@@ -230,7 +233,8 @@ Your job is to craft a section of a professional report that is clear, logically
 )
 
 section_grader_instructions = (
-    """You are a technical, financial and investment expert, and you are reviewing a report section based on the given topic.
+    """
+You are a technical, financial and investment expert, and you are reviewing a report section based on the given topic.
 Apply the **highest standards of rigor, accuracy, and professionalism**, as if you were a demanding Senior Executive in the Industry Research Division at J.P. Morgan Asset Management, known for **pushing for exceptional quality and identifying any potential weaknesses**.
 Your goal is not just to pass or fail, but to **ensure the content reaches an exemplary standard through critical feedback.**
 
@@ -254,10 +258,6 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
 
     *Targeted Search Queries for Improvement (Mandatory if any weaknesses are identified or if the section is not 'exemplary'):*
         * Based on the **explicitly identified weaknesses, gaps, or areas needing more depth**, generate highly specific search queries designed to gather the exact missing information or to deepen the underdeveloped aspects of the analysis.
-        * **Query Format Requirements**:
-          - Use KEYWORD format, not sentences (3-8 tokens max)
-          - Format: [Entity] [Concept] [Time?]
-          - Examples: "台積電 N3 良率 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
         * These queries should be phrases suitable for effective web searching (e.g., for academic databases, financial news, industry reports); avoid being overly declarative or too broad.
 
 2.  **Hypothetical & Exploratory Queries for Broader Context (Generate these always):**
@@ -270,30 +270,27 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
         * Emerging technologies and disruptive innovations (potential impact, adoption rates, barriers)
         * Geopolitical risks and their quantifiable or qualitative potential impacts on the topic
         * ESG (Environmental, Social, Governance) considerations relevant to the topic.
-        
+
 3.  **Identify Drill-Down Opportunities:**
-    * While evaluating the content, proactively identify the most critical, interesting, or noteworthy **'Key Findings'** that warrant deeper investigation. This could be a 
+    * While evaluating the content, proactively identify the most critical, interesting, or noteworthy **'Key Findings'** that warrant deeper investigation. This could be a
      specific data point, a significant event, or an unexpected trend.
     * If such findings are identified, generate specific **'drill-down' queries** in the `follow_up_queries`. These queries must be highly specific, designed to uncover the underlying
      details, causes, or impacts of that finding.
     * If the section is generally well-written but you have identified a Key Finding that requires further detail, you **must** rate the `grade` as `fail`. This will trigger a
      'drill-down' research loop. Only rate the `grade` as `pass` once the content is comprehensive and all identified Key Findings have been sufficiently explored and integrated.
 
-4.  **Language for search queries:**
-    * If the follow-up search query is only **related to Taiwan, use Traditional Chinese** queries only.
-    * If the follow-up search query is **related to Europe, America, the broader Asia-Pacific region, or globally, use English queries.**
+"""
+    + LANGUAGE_RULES_SHORT + """
 
-5.  **Query Uniqueness and Evolution:**
+"""
+    + QUERY_FORMAT_INSTRUCTION_SHORT + """
+
+6.  **Query Uniqueness and Evolution:**
     *   **Review History:** Before generating any new queries, you must carefully review the `Queries History`.
     *   **Avoid Semantic Duplication:** Strictly prohibit generating queries that are semantically identical or highly similar to any existing queries in the history.
     *   **Deepen, Don't Repeat:** If a topic requires more information, formulate a new query that approaches it from a different angle, at a deeper level, or investigates its root causes, rather than simply repeating or slightly rephrasing an old query. The goal is to uncover new information, not to retrieve the same content again.
 
-6.  **Query Conciseness and Search Effectiveness:**
-    * **Keep It Concise**: The Query should not be overly long.
-    * **Avoid Over-Description:** Do not make the Query excessively descriptive or narrative.
-    * **Optimize for Google Search:** Since the Query will be sent to Google Search, it must be crafted to maximize both recall and precision in the returned results.
-
-6.  **Query Prioritization and Limit:**
+7.  **Query Prioritization and Limit:**
     *   **Total Limit:** Generate a maximum of 3 queries in total.
     *   **Selection Priority:** Prioritize the queries to generate based on this strict order of importance, ensuring the most critical issues are addressed first:
         1.  **Targeted Improvement Queries (from Task 1):** Highest priority. Generate these to fix specific, identified content weaknesses or gaps.
