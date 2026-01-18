@@ -1,18 +1,4 @@
-"""
-PROMPT VERSION: 2.0
-LAST UPDATED: 2025-01-18
-CHANGES:
-- v2.0: Added query format optimization (keyword-based, 3-8 tokens)
-- v2.0: Imported shared modules (language_rules, query_format, source_integrity)
-- v2.0: Added ANTI-NARROWING PRINCIPLES to refine_section_instructions
-- v1.9: Added strict source integrity rules
-- v1.8: Initial version
-"""
-
 import datetime
-
-from .shared.language_rules import LANGUAGE_RULES_SHORT
-from .shared.query_format import QUERY_FORMAT_INSTRUCTION_SHORT
 
 time = datetime.datetime.now()
 curr_date = datetime.datetime.strftime(time, format="%Y/%m/%d")
@@ -94,23 +80,27 @@ Here is feedback on the report structure from review (if any):
 )
 
 query_writer_instructions = (
-    """
-You are an expert financial and investment writer crafting targeted web search queries for report research.
+    """You are an expert financial and investment writer crafting targeted web search queries for report research.
 
 <Task>
 Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information for the section topic.
 </Task>
 
-"""
-    + QUERY_FORMAT_INSTRUCTION_SHORT + """
+<Query Format>
+- Use KEYWORDS, not sentences (3-8 tokens max)
+- Format: [Entity] [Concept] [Time?]
+- Examples: "台積電 N3 良率 2023 Q4" | "US CPI December 2023"
+</Query Format>
 
 <Query Strategy>
 - Generate queries that examine different aspects of the topic
 - Use layered approach: broad → focused → financial/technical
 - Max 8 tokens per query
 
-"""
-    + LANGUAGE_RULES_SHORT + """
+<Language Rules>
+- Taiwan-only topics: Traditional Chinese
+- Global/US/Europe/Asia topics: English
+</Language Rules>
 
 <Topic>
 {topic}
@@ -233,8 +223,7 @@ Your job is to craft a section of a professional report that is clear, logically
 )
 
 section_grader_instructions = (
-    """
-You are a technical, financial and investment expert, and you are reviewing a report section based on the given topic.
+    """You are a technical, financial and investment expert, and you are reviewing a report section based on the given topic.
 Apply the **highest standards of rigor, accuracy, and professionalism**, as if you were a demanding Senior Executive in the Industry Research Division at J.P. Morgan Asset Management, known for **pushing for exceptional quality and identifying any potential weaknesses**.
 Your goal is not just to pass or fail, but to **ensure the content reaches an exemplary standard through critical feedback.**
 
@@ -258,6 +247,7 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
 
     *Targeted Search Queries for Improvement (Mandatory if any weaknesses are identified or if the section is not 'exemplary'):*
         * Based on the **explicitly identified weaknesses, gaps, or areas needing more depth**, generate highly specific search queries designed to gather the exact missing information or to deepen the underdeveloped aspects of the analysis.
+        * **Query Format Requirements**: Use KEYWORD format, not sentences (3-8 tokens max). Format: [Entity] [Concept] [Time?]. Examples: "台積電 N3 良率 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
         * These queries should be phrases suitable for effective web searching (e.g., for academic databases, financial news, industry reports); avoid being overly declarative or too broad.
 
 2.  **Hypothetical & Exploratory Queries for Broader Context (Generate these always):**
@@ -279,16 +269,19 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
     * If the section is generally well-written but you have identified a Key Finding that requires further detail, you **must** rate the `grade` as `fail`. This will trigger a
      'drill-down' research loop. Only rate the `grade` as `pass` once the content is comprehensive and all identified Key Findings have been sufficiently explored and integrated.
 
-"""
-    + LANGUAGE_RULES_SHORT + """
+4.  **Language for search queries:**
+    * If the follow-up search query is only **related to Taiwan, use Traditional Chinese** queries only.
+    * If the follow-up search query is **related to Europe, America, the broader Asia-Pacific region, or globally, use English queries.**
 
-"""
-    + QUERY_FORMAT_INSTRUCTION_SHORT + """
-
-6.  **Query Uniqueness and Evolution:**
+5.  **Query Uniqueness and Evolution:**
     *   **Review History:** Before generating any new queries, you must carefully review the `Queries History`.
     *   **Avoid Semantic Duplication:** Strictly prohibit generating queries that are semantically identical or highly similar to any existing queries in the history.
     *   **Deepen, Don't Repeat:** If a topic requires more information, formulate a new query that approaches it from a different angle, at a deeper level, or investigates its root causes, rather than simply repeating or slightly rephrasing an old query. The goal is to uncover new information, not to retrieve the same content again.
+
+6.  **Query Conciseness and Search Effectiveness:**
+    * **Keep It Concise**: The Query should not be overly long.
+    * **Avoid Over-Description:** Do not make the Query excessively descriptive or narrative.
+    * **Optimize for Google Search:** Since the Query will be sent to Google Search, it must be crafted to maximize both recall and precision in the returned results.
 
 7.  **Query Prioritization and Limit:**
     *   **Total Limit:** Generate a maximum of 3 queries in total.
