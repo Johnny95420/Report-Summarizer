@@ -11,14 +11,8 @@ CHANGES:
 
 import datetime
 
-from .shared.language_rules import LANGUAGE_RULES_FULL, LANGUAGE_RULES_SHORT
-from .shared.query_format import QUERY_FORMAT_INSTRUCTION_SHORT, QUERY_FORMAT_EXAMPLES
-from .shared.source_integrity import (
-    SOURCE_INTEGRITY_RULES_FULL,
-    SOURCE_INTEGRITY_RULES_SHORT,
-    SOURCE_VALIDATION_REQUIREMENTS,
-    HALLUCINATION_DETECTION_RULES,
-)
+from .shared.language_rules import LANGUAGE_RULES_SHORT
+from .shared.query_format import QUERY_FORMAT_INSTRUCTION_SHORT
 
 time = datetime.datetime.now()
 curr_date = datetime.datetime.strftime(time, format="%Y/%m/%d")
@@ -473,7 +467,7 @@ For "content":
 
 
 <Query Requirements>
-Generate **{{number_of_queries}}** targeted queries to fill explicit gaps you flagged in the content and to deepen analysis:
+Generate **{number_of_queries}** targeted queries to fill explicit gaps you flagged in the content and to deepen analysis:
 1) **Query Format**: Use KEYWORD format, not sentences (3-8 tokens max)
    - Format: [Entity] [Concept] [Time?]
    - Examples: "台積電 N3 良率 Q4" | "Nvidia H100 規格" | "US CPI December 2023"

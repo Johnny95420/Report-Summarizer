@@ -1,0 +1,24 @@
+[project]
+name = "pdf-parser"
+version = "0.1.0"
+requires-python = ">=3.12"
+description = "LangGraph-based Deep Research Agent for automated research report generation"
+dependencies = [
+    "langchain",
+    "langchain-community",
+    "langchain-core",
+    "langgraph",
+    "langchain-huggingface",
+    "langchain-litellm",
+    "litellm",
+    "tavily-python",
+    "torch",
+    "marker-pdf",
+    "pandas",
+    "markdown-it-py",
+    "chromadb",
+    "rank-bm25",
+    "python-dotenv",
+    "omegaconf",
+    "requests",
+]
