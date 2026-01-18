@@ -1,6 +1,4 @@
 from dotenv import load_dotenv
-
-load_dotenv(".env")
 import asyncio
 import logging
 
@@ -9,49 +7,20 @@ from typing import Literal
 
 import omegaconf
 
-config = omegaconf.OmegaConf.load("report_config.yaml")
-PROMPT_STYLE = config["PROMPT_STYLE"]
-
-PLANNER_MODEL_NAME = config["PLANNER_MODEL_NAME"]
-BACKUP_PLANNER_MODEL_NAME = config["BACKUP_PLANNER_MODEL_NAME"]
-
-VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
-BACKUP_VERIFY_MODEL_NAME = config["BACKUP_VERIFY_MODEL_NAME"]
-
-MODEL_NAME = config["MODEL_NAME"]
-BACKUP_MODEL_NAME = config["BACKUP_MODEL_NAME"]
-
-WRITER_MODEL_NAME = config["WRITER_MODEL_NAME"]
-BACKUP_WRITER_MODEL_NAME = config["BACKUP_WRITER_MODEL_NAME"]
-
-CONCLUDE_MODEL_NAME = config["CONCLUDE_MODEL_NAME"]
-BACKUP_CONCLUDE_MODEL_NAME = config["BACKUP_CONCLUDE_MODEL_NAME"]
-
-DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
-
 
 from langchain_community.callbacks.infino_callback import get_num_tokens
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.constants import Send
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-if PROMPT_STYLE == "research":
-    from Prompt.technical_research_prompt import *
-elif PROMPT_STYLE == "industry":
-    from Prompt.industry_prompt import *
-else:
-    raise ValueError("Only support indutry and technical_research prompt template")
 from copy import deepcopy
 
 from agentic_search import agentic_search_graph
 from retriever import hybrid_retriever
 from State.state import (
-    RefinedSection,
-    clearable_list_reducer,
     ReportState,
     ReportStateInput,
     ReportStateOutput,
@@ -76,6 +45,33 @@ from Utils.utils import (
     track_expanded_context,
     web_search_deduplicate_and_format_sources,
 )
+
+load_dotenv(".env")
+config = omegaconf.OmegaConf.load("report_config.yaml")
+PROMPT_STYLE = config["PROMPT_STYLE"]
+
+PLANNER_MODEL_NAME = config["PLANNER_MODEL_NAME"]
+BACKUP_PLANNER_MODEL_NAME = config["BACKUP_PLANNER_MODEL_NAME"]
+
+VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
+BACKUP_VERIFY_MODEL_NAME = config["BACKUP_VERIFY_MODEL_NAME"]
+
+MODEL_NAME = config["MODEL_NAME"]
+BACKUP_MODEL_NAME = config["BACKUP_MODEL_NAME"]
+
+WRITER_MODEL_NAME = config["WRITER_MODEL_NAME"]
+BACKUP_WRITER_MODEL_NAME = config["BACKUP_WRITER_MODEL_NAME"]
+
+CONCLUDE_MODEL_NAME = config["CONCLUDE_MODEL_NAME"]
+BACKUP_CONCLUDE_MODEL_NAME = config["BACKUP_CONCLUDE_MODEL_NAME"]
+
+DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
+if PROMPT_STYLE == "research":
+    from Prompt.technical_research_prompt import *
+elif PROMPT_STYLE == "industry":
+    from Prompt.industry_prompt import *
+else:
+    raise ValueError("Only support indutry and technical_research prompt template")
 
 logger = logging.getLogger("AgentLogger")
 logger.setLevel(logging.ERROR)
@@ -146,7 +142,11 @@ def _call_llm_with_retry(
     while retry < max_retries:
         try:
             return call_llm(
-                model_name, backup_model_name, messages, tool=tool, tool_choice=tool_choice
+                model_name,
+                backup_model_name,
+                messages,
+                tool=tool,
+                tool_choice=tool_choice,
             )
         except Exception as e:
             retry += 1
@@ -168,7 +168,11 @@ async def _call_llm_async_with_retry(
     while retry < max_retries:
         try:
             return await call_llm_async(
-                model_name, backup_model_name, messages, tool=tool, tool_choice=tool_choice
+                model_name,
+                backup_model_name,
+                messages,
+                tool=tool,
+                tool_choice=tool_choice,
             )
         except Exception as e:
             retry += 1
@@ -464,7 +468,9 @@ def _prepare_source_for_writing(state: SectionState) -> str:
     return source_str
 
 
-def _generate_section_content(section: Section, source_str: str, state: SectionState) -> str:
+def _generate_section_content(
+    section: Section, source_str: str, state: SectionState
+) -> str:
     """Generate section content using LLM."""
     system_instructions = section_writer_instructions.format(
         section_title=section.name,
@@ -780,9 +786,7 @@ class ReportGraphBuilder:
         )
         builder.add_node("generate_report_plan", generate_report_plan)
         builder.add_node("human_feedback", human_feedback)
-        builder.add_node(
-            "build_section_with_web_research", section_graph.compile()
-        )
+        builder.add_node("build_section_with_web_research", section_graph.compile())
         builder.add_node("route", route_node)
         builder.add_node("refine_sections", refine_sections)
         builder.add_node("gather_complete_section", gather_complete_section)

@@ -269,7 +269,7 @@ def format_search_results(results: List[Document], char_limit: int = 500):
 
     for doc in results:
         formatted_text += f"Source {doc.metadata['path']}:\n===\n"
-        formatted_text += f"Content from source:"
+        formatted_text += "Content from source:"
         raw_content = doc.page_content
         if len(raw_content) > char_limit:
             raw_content = raw_content[:char_limit] + "... [truncated]"
