@@ -270,20 +270,15 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
      'drill-down' research loop. Only rate the `grade` as `pass` once the content is comprehensive and all identified Key Findings have been sufficiently explored and integrated.
 
 4.  **Language for search queries:**
-    * If the follow-up search query is only **related to Taiwan, use Traditional Chinese** queries only.
-    * If the follow-up search query is **related to Europe, America, the broader Asia-Pacific region, or globally, use English queries.**
+    * Taiwan-only topics: Traditional Chinese
+    * Global/US/Europe/Asia topics: English
 
 5.  **Query Uniqueness and Evolution:**
     *   **Review History:** Before generating any new queries, you must carefully review the `Queries History`.
     *   **Avoid Semantic Duplication:** Strictly prohibit generating queries that are semantically identical or highly similar to any existing queries in the history.
     *   **Deepen, Don't Repeat:** If a topic requires more information, formulate a new query that approaches it from a different angle, at a deeper level, or investigates its root causes, rather than simply repeating or slightly rephrasing an old query. The goal is to uncover new information, not to retrieve the same content again.
 
-6.  **Query Conciseness and Search Effectiveness:**
-    * **Keep It Concise**: The Query should not be overly long.
-    * **Avoid Over-Description:** Do not make the Query excessively descriptive or narrative.
-    * **Optimize for Google Search:** Since the Query will be sent to Google Search, it must be crafted to maximize both recall and precision in the returned results.
-
-7.  **Query Prioritization and Limit:**
+6.  **Query Prioritization and Limit:**
     *   **Total Limit:** Generate a maximum of 3 queries in total.
     *   **Selection Priority:** Prioritize the queries to generate based on this strict order of importance, ensuring the most critical issues are addressed first:
         1.  **Targeted Improvement Queries (from Task 1):** Highest priority. Generate these to fix specific, identified content weaknesses or gaps.
