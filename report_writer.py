@@ -1,20 +1,66 @@
 from dotenv import load_dotenv
+load_dotenv(".env")
 import asyncio
 import logging
 
 import sqlite3
 from typing import Literal
 
+import pathlib
+
 import omegaconf
 
+_HERE = pathlib.Path(__file__).parent
+config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
+PROMPT_STYLE = config["PROMPT_STYLE"]
+
+PLANNER_MODEL_NAME = config["PLANNER_MODEL_NAME"]
+BACKUP_PLANNER_MODEL_NAME = config["BACKUP_PLANNER_MODEL_NAME"]
+
+VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
+BACKUP_VERIFY_MODEL_NAME = config["BACKUP_VERIFY_MODEL_NAME"]
+
+MODEL_NAME = config["MODEL_NAME"]
+BACKUP_MODEL_NAME = config["BACKUP_MODEL_NAME"]
+
+WRITER_MODEL_NAME = config["WRITER_MODEL_NAME"]
+BACKUP_WRITER_MODEL_NAME = config["BACKUP_WRITER_MODEL_NAME"]
+
+CONCLUDE_MODEL_NAME = config["CONCLUDE_MODEL_NAME"]
+BACKUP_CONCLUDE_MODEL_NAME = config["BACKUP_CONCLUDE_MODEL_NAME"]
+
+DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
+if PROMPT_STYLE == "research":
+    from Prompt.technical_research_prompt import (
+        report_planner_query_writer_instructions,
+        report_planner_instructions,
+        query_writer_instructions,
+        section_writer_instructions,
+        section_grader_instructions,
+        final_section_writer_instructions,
+        refine_section_instructions,
+        content_refinement_instructions,
+    )
+elif PROMPT_STYLE == "industry":
+    from Prompt.industry_prompt import (
+        report_planner_query_writer_instructions,
+        report_planner_instructions,
+        query_writer_instructions,
+        section_writer_instructions,
+        section_grader_instructions,
+        final_section_writer_instructions,
+        refine_section_instructions,
+        content_refinement_instructions,
+    )
+else:
+    raise ValueError("Only support industry and technical_research prompt template")
 
 from langchain_community.callbacks.infino_callback import get_num_tokens
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.constants import Send
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
+from langgraph.types import Command, Send, interrupt
 
 from copy import deepcopy
 
@@ -46,38 +92,13 @@ from Utils.utils import (
     web_search_deduplicate_and_format_sources,
 )
 
-load_dotenv(".env")
-config = omegaconf.OmegaConf.load("report_config.yaml")
-PROMPT_STYLE = config["PROMPT_STYLE"]
 
-PLANNER_MODEL_NAME = config["PLANNER_MODEL_NAME"]
-BACKUP_PLANNER_MODEL_NAME = config["BACKUP_PLANNER_MODEL_NAME"]
-
-VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
-BACKUP_VERIFY_MODEL_NAME = config["BACKUP_VERIFY_MODEL_NAME"]
-
-MODEL_NAME = config["MODEL_NAME"]
-BACKUP_MODEL_NAME = config["BACKUP_MODEL_NAME"]
-
-WRITER_MODEL_NAME = config["WRITER_MODEL_NAME"]
-BACKUP_WRITER_MODEL_NAME = config["BACKUP_WRITER_MODEL_NAME"]
-
-CONCLUDE_MODEL_NAME = config["CONCLUDE_MODEL_NAME"]
-BACKUP_CONCLUDE_MODEL_NAME = config["BACKUP_CONCLUDE_MODEL_NAME"]
-
-DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
-if PROMPT_STYLE == "research":
-    from Prompt.technical_research_prompt import *
-elif PROMPT_STYLE == "industry":
-    from Prompt.industry_prompt import *
-else:
-    raise ValueError("Only support indutry and technical_research prompt template")
 
 logger = logging.getLogger("AgentLogger")
-logger.setLevel(logging.ERROR)
+logger.setLevel(logging.INFO)
 
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.ERROR)
+console_handler.setLevel(logging.INFO)
 
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
@@ -99,7 +120,7 @@ def search_relevance_doc(queries):
     for q in queries:
         if q == "":
             continue
-        results = hybrid_retriever.get_relevant_documents(q)
+        results = hybrid_retriever.invoke(q)
         for res in results:
             if res.page_content in seen:
                 continue
@@ -451,6 +472,7 @@ def _prepare_source_for_writing(state: SectionState) -> str:
             section_topic=section.description,
             context=source_str,
             section_content=section.content or "",
+            follow_up_queries=_format_follow_up_questions(state.get("follow_up_queries")),
         )
         num_tokens = get_num_tokens(system_instructions, "gpt-4o-mini")
         num_retries += 1
@@ -768,7 +790,7 @@ class ReportGraphBuilder:
 
     def _build_section_graph(self) -> StateGraph:
         """Build the section subgraph (shared by sync/async)."""
-        section_builder = StateGraph(SectionState, output=SectionOutputState)
+        section_builder = StateGraph(SectionState, output_schema=SectionOutputState)
         section_builder.add_node("generate_queries", generate_queries)
         section_builder.add_node("search_db", search_db)
         section_builder.add_node("write_section", write_section)
@@ -782,7 +804,7 @@ class ReportGraphBuilder:
     def _build_main_graph(self, section_graph: StateGraph) -> StateGraph:
         """Build the main report graph (shared by sync/async)."""
         builder = StateGraph(
-            ReportState, input=ReportStateInput, output=ReportStateOutput
+            ReportState, input_schema=ReportStateInput, output_schema=ReportStateOutput
         )
         builder.add_node("generate_report_plan", generate_report_plan)
         builder.add_node("human_feedback", human_feedback)

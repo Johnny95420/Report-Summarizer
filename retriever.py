@@ -5,9 +5,9 @@ import json
 
 import omegaconf
 import torch
-from langchain.retrievers import BM25Retriever
-from langchain.retrievers.ensemble import EnsembleRetriever
-from langchain.schema import Document
+from langchain_community.retrievers import BM25Retriever
+from langchain_classic.retrievers import EnsembleRetriever
+from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -87,7 +87,10 @@ def process_document(name, date, information):
 
 
 # %%
-config = omegaconf.OmegaConf.load("retriever_config.yaml")
+import pathlib
+
+_HERE = pathlib.Path(__file__).parent
+config = omegaconf.OmegaConf.load(_HERE / "retriever_config.yaml")
 files = []
 if config["raw_file_path"] is not None:
     for f in config["raw_file_path"]:

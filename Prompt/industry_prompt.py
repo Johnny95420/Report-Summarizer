@@ -80,17 +80,26 @@ Here is feedback on the report structure from review (if any):
 )
 
 query_writer_instructions = (
-    """You are an expert financial and investment writer crafting targeted retrieval augmented generation and web search queries that will gather comprehensive information for writing a objective and technical report section.
+    """You are an expert financial and investment writer crafting targeted web search queries for report research.
 
 <Task>
-Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information above the section topic. 
-
-The queries should:
-1. Be related to the topic 
-2. Examine different aspects of the topic
-3. If the topic is only related to Taiwan, use Traditional Chinese queries only.
-4. If the topic is related to Europe, America, the broader Asia-Pacific region, or globally, use English queries.
+Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information for the section topic.
 </Task>
+
+<Query Format>
+- Use KEYWORDS, not sentences (target 3-8 words; up to 12 for complex multi-concept queries)
+- Format: [Entity] [Concept] [Time?]
+- Examples: "台積電 N3 良率 2023 Q4" | "US CPI December 2023" | "Nvidia H100 supply chain bottleneck impact hyperscaler capex 2024"
+</Query Format>
+
+<Query Strategy>
+- Generate queries that examine different aspects of the topic
+- Use layered approach: broad → focused → financial/technical
+
+<Language Rules>
+- Taiwan-only topics: Traditional Chinese
+- Global/US/Europe/Asia topics: English
+</Language Rules>
 
 <Topic>
 {topic}
@@ -237,6 +246,7 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
 
     *Targeted Search Queries for Improvement (Mandatory if any weaknesses are identified or if the section is not 'exemplary'):*
         * Based on the **explicitly identified weaknesses, gaps, or areas needing more depth**, generate highly specific search queries designed to gather the exact missing information or to deepen the underdeveloped aspects of the analysis.
+        * **Query Format Requirements**: Use KEYWORD format, not sentences (target 3-8 words; up to 12 for complex multi-concept queries). Format: [Entity] [Concept] [Time?]. Examples: "台積電 N3 良率 2023 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
         * These queries should be phrases suitable for effective web searching (e.g., for academic databases, financial news, industry reports); avoid being overly declarative or too broad.
 
 2.  **Hypothetical & Exploratory Queries for Broader Context (Generate these always):**
@@ -249,9 +259,9 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
         * Emerging technologies and disruptive innovations (potential impact, adoption rates, barriers)
         * Geopolitical risks and their quantifiable or qualitative potential impacts on the topic
         * ESG (Environmental, Social, Governance) considerations relevant to the topic.
-        
+
 3.  **Identify Drill-Down Opportunities:**
-    * While evaluating the content, proactively identify the most critical, interesting, or noteworthy **'Key Findings'** that warrant deeper investigation. This could be a 
+    * While evaluating the content, proactively identify the most critical, interesting, or noteworthy **'Key Findings'** that warrant deeper investigation. This could be a
      specific data point, a significant event, or an unexpected trend.
     * If such findings are identified, generate specific **'drill-down' queries** in the `follow_up_queries`. These queries must be highly specific, designed to uncover the underlying
      details, causes, or impacts of that finding.
@@ -259,8 +269,8 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
      'drill-down' research loop. Only rate the `grade` as `pass` once the content is comprehensive and all identified Key Findings have been sufficiently explored and integrated.
 
 4.  **Language for search queries:**
-    * If the follow-up search query is only **related to Taiwan, use Traditional Chinese** queries only.
-    * If the follow-up search query is **related to Europe, America, the broader Asia-Pacific region, or globally, use English queries.**
+    * Taiwan-only topics: Traditional Chinese
+    * Global/US/Europe/Asia topics: English
 
 5.  **Query Uniqueness and Evolution:**
     *   **Review History:** Before generating any new queries, you must carefully review the `Queries History`.
@@ -354,9 +364,25 @@ refine_section_instructions = (
     """You are an expert report editor and retrieval planner. Your task is to refine ONE specific section of a report by leveraging the FULL context of all other sections, then propose targeted web search queries to close evidence gaps.
 
 <Task>
-1) Rewrite the section’s "description" and "content" using the full report context.
+1) Rewrite the section's "description" and "content" using the full report context.
 2) Produce "queries" to obtain missing facts, metrics, or corroboration.
 </Task>
+
+<ANTI-NARROWING PRINCIPLES>
+- **Dimension Preservation**: When refining descriptions, you MUST preserve ALL analytical dimensions from the original
+  * Examples of dimensions: market background, financial metrics, competitive landscape, risk factors, technical specifications
+  * DO NOT reduce multi-dimensional analysis to single focus
+
+- **Deepen, Don't Replace**: Your refinement should ADD specificity to existing dimensions, not remove them
+  * ❌ Bad: "Focus only on N3 yield improvement"
+  * ✅ Good: "Analyze N3 yield trends (historical + current), impact on gross margins, customer adoption rates, and competitive comparison with Samsung GAA"
+
+- **Missing Dimension Detection**: Identify dimensions that are MISSING from the original and ADD them
+  * If a section on "competitive analysis" only mentions one competitor, add queries for others
+  * If "risk factors" are absent, explicitly add them
+
+- **Output Format**: For refined_description, output ONLY the additions - do not repeat the original
+</ANTI-NARROWING PRINCIPLES>
 
 <Rigorous Principles>
 - Write the final description and content in **Traditional Chinese**.
@@ -426,14 +452,16 @@ For "content":
 
 <Query Requirements>
 Generate **{number_of_queries}** targeted queries to fill explicit gaps you flagged in the content and to deepen analysis:
-1) Each query must map to a concrete missing data point, validation need, or analytical deepening you identified.
-2) Cover multiple angles as needed: statistics, regulations/policy, financial disclosures, industry reports, technical specs/standards, benchmarks/peers, and risk events (as applicable).
-3) Language rules:
+1) **Query Format**: Use KEYWORD format, not sentences (target 3-8 words; up to 12 for complex multi-concept queries)
+   - Format: [Entity] [Concept] [Time?]
+   - Examples: "台積電 N3 良率 2023 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
+2) Each query must map to a concrete missing data point, validation need, or analytical deepening you identified.
+3) Cover multiple angles as needed: statistics, regulations/policy, financial disclosures, industry reports, technical specs/standards, benchmarks/peers, and risk events (as applicable).
+4) Language rules:
    - If the topic pertains **only to Taiwan**, use **Traditional Chinese** queries.
    - If it concerns **Europe/US/APAC or global** scope, use **English** queries.
-4) Make queries highly retrievable: include time bounds (e.g., 2019..2025, "Q2 2024"), key entities (companies/products/locations/standards), and operators when useful (e.g., site:, filetype:pdf, intitle:).
-5) No semantic duplicates; each query should solve a different gap or approach.
-6) Avoid leading phrasing; write search-ready strings rather than conclusions.
+5) Make queries highly retrievable: include time bounds (e.g., 2019..2025, "Q2 2024"), key entities (companies/products/locations/standards), and operators when useful (e.g., site:, filetype:pdf, intitle:).
+6) No semantic duplicates; each query should solve a different gap or approach.
 </Query Requirements>
 
 
@@ -443,7 +471,7 @@ Generate **{number_of_queries}** targeted queries to fill explicit gaps you flag
     - The `refined_description` output contains **only the additions or corrections**, not the full original description.
     - The additions do not repeat information already present in the original description. If no new information can be added, the output is an empty string.
     - If an inconsistency was found, the output starts with a **"Correction Note:"** paragraph.
-    - The additions integrate context from the full report, clarify background details (events, names, timepoints), and provide deeper, more comprehensive guidance for the section.
+    - The description integrates context from the full report, clarifies background details (events, names, timepoints), and provides deeper, more comprehensive guidance for the section.
     - The guidance clearly defines the analysis to be performed and the data required, using quantitative framing where appropriate.
 - **Content Output**:
     - The `refined_content` is a comprehensive, well-structured, and **factually sound** narrative that aligns with the refined description.

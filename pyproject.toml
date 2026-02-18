@@ -1,0 +1,60 @@
+[project]
+name = "pdf-parser"
+version = "0.1.0"
+description = "LangGraph-based Deep Research Agent for automated research report generation"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    # Core application
+    "fastapi",
+    "uvicorn",
+    "python-dotenv",
+    "omegaconf",
+    "pydantic",
+
+    # LangChain and related libraries
+    "langchain",
+    "langchain-community",
+    "langchain-core",
+    "langgraph",
+    "langchain-huggingface",
+    "langchain-litellm",
+    "langchain-classic",
+    "langchain-text-splitters",
+    "litellm",
+    "tavily-python",
+
+    # Data Processing
+    "beautifulsoup4",
+    "pandas",
+    "trafilatura",
+    "markdown-it-py",
+    "lxml",
+    "scikit-learn",
+
+    # Search and Drivers
+    "undetected-chromedriver",
+    "selenium",
+    "requests",
+    "psutil",
+
+    # Vector Store and Retrievers
+    "chromadb",
+    "rank-bm25",
+
+    # Storage
+    "minio",
+]
+
+[project.optional-dependencies]
+# ML/Audio packages — torch provided by container, install with: pip install --no-deps funasr marker-pdf
+ml = [
+    "funasr",
+    "marker-pdf",
+]
+dev = ["ipython"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

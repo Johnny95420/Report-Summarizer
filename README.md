@@ -118,6 +118,28 @@ Our RAG process is inspired by Ilya Rice's award-winning strategy, using a "smal
 
 ---
 
+## 📦 Installation
+
+This project uses [Poetry](https://python-poetry.org/) for dependency management.
+
+```bash
+# Install main dependencies
+poetry install
+
+# Install with dev tools (ipython)
+poetry install --extras dev
+```
+
+**ML/Audio packages** (`funasr`, `marker-pdf`) depend on `torch`, which is expected to be provided by the container environment. Install them separately after `poetry install`:
+
+```bash
+pip install --no-deps funasr marker-pdf
+```
+
+> **Note:** `torch` is intentionally excluded from `pyproject.toml` — it should be pre-installed in the container with the appropriate CUDA version.
+
+---
+
 ## 🧪 Usage
 
 ### 1. Preprocess Local Data (Optional)

@@ -1,15 +1,16 @@
-import os
-import pprint
-
 from dotenv import load_dotenv
 
 load_dotenv(".env")
+
+import os
+import pathlib
+import pprint
 from typing import Literal
 
 import omegaconf
-from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_litellm import ChatLiteLLM
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
@@ -21,7 +22,8 @@ from State.simple_state import RAGState, RAGStateInput
 from Tools.simple_tools import (final_judge_formatter, queries_formatter,
                                 scores_formatter)
 
-config = omegaconf.OmegaConf.load("report_config.yaml")
+_HERE = pathlib.Path(__file__).parent
+config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
 MODEL_NAME = config["MODEL_NAME"]
 VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
 
@@ -52,7 +54,7 @@ def search_relevance_doc(state: RAGState, config: RunnableConfig):
     for q in queries:
         if q == "":
             continue
-        results = hybrid_retriever.get_relevant_documents(q)
+        results = hybrid_retriever.invoke(q)
         for res in results:
             if res not in info:
                 info.append(res)

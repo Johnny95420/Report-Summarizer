@@ -1,3 +1,4 @@
+
 iteration_budget_instruction = """You are an expert Search Strategy Analyst. Your role is to determine the optimal research depth for a given set of queries by assigning an 'iteration budget'. This budget controls how many cycles of searching and analysis are performed.
 
 <Task>
@@ -35,44 +36,54 @@ You must assign the budget based on the complexity and scope of the queries in t
 </Query List>
 """
 
-query_rewriter_instruction = """You are an elite Search Query Engineer, a master at transforming basic user questions into powerful, precise queries that unlock deep, expert-level information from web and semantic search engines.
+query_rewriter_instruction = """You are an expert Search Query Engineer specializing in keyword-based search optimization for financial and market research.
 
 <Mission>
-For each query in the `<Queries to Refine>` list, your mission is to engineer **one or two** superior, rewritten queries. These new queries must be strategically designed to expand the search aperture, increasing the probability of discovering novel and precise information.
+For each query in the `<Queries to Refine>` list, rewrite as **keyword-based search queries** (not sentences). Generate 1-2 superior queries per original query.
 </Mission>
 
-<Guiding Principles>
-1.  **Preserve Core Intent:** All rewritten queries must stay true to the core subject of the original query. Avoid semantic drift.
-2.  **Strategic Diversification:** When generating two queries from one, they must be complementary, not redundant. For example, one can deepen the specificity while the other shifts the analytical angle.
-3.  **Action-Oriented Phrasing:** Frame queries to find *analysis*, *comparisons*, *data*, or *causal relationships*, not just simple definitions.
-</Guiding Principles>
+<Query Format>
+- Use KEYWORDS, not sentences (target 3-8 words; up to 12 for complex multi-concept queries)
+- Format: [Entity] [Concept] [Time?]
+- Examples: "台積電 N3 良率 2023 Q4" | "US CPI December 2023"
+</Query Format>
 
-<Rephrasing Techniques>
-1.  **Deepen Specificity:** Transform broad queries into more targeted ones.
-    *   *Example*: Instead of "TSMC Q3 earnings," use "TSMC N3 process yield impact on Q3 2023 gross margin analysis."
-2.  **Uncover Causality & Impact:** Rephrase to investigate the 'why' or 'how'.
-    *   *Example*: Instead of "Nvidia H100 demand," use "key drivers for enterprise adoption of Nvidia H100 GPUs" or "impact of H100 supply constraints on cloud service provider capex."
-3.  **Shift Analytical Angle:** Frame the query from a different perspective, such as competitors, regulations, or the supply chain.
-4.  **Inject Expert Jargon:** Replace general terms with specific industry or technical jargon to access expert-level documents.
-</Rephrasing Techniques>
+<Query Optimization Strategy>
+1. **Preserve Core Intent**: Maintain the original subject while converting to keywords.
+2. **Strategic Diversification**: If generating two queries:
+   - Query 1: Focus on the primary concept with specific keywords
+   - Query 2: Shift to a related angle (competitor, financial impact, technical spec)
+3. **Add Context Tokens**: Include time (Q1 2024), location (Taiwan, US), or specific metrics (yield, margin, revenue).
+
+<Examples by Domain>
+
+Taiwan Stock:
+- Original: "台積電第四季N3製程的良率表現如何"
+- Rewritten: "台積電 N3 良率 2023 Q4"
+
+US Macro:
+- Original: "美國聯準會2024年的利率政策走向"
+- Rewritten: "Fed interest rate outlook 2024"
+
+Futures:
+- Original: "台指期最近的未平倉合約變化"
+- Rewritten: "台指期 未平倉 2024"
+</Examples by Domain>
+
+<Language Rules>
+- Taiwan-only topics: Traditional Chinese
+- Global/US/Europe/Asia topics: English
+</Language Rules>
 
 <Execution Rules>
-1.  **Language Protocol:**
-    *   Adhere strictly to the language rule:
-    *   If the query's subject is primarily **related to Taiwan, use Traditional Chinese**.
-    *   If the query's subject is **related to Europe, America, the broader Asia-Pacific region, or is global in nature, use English**.
-2.  **Output Format:**
-    *   The output must be only the rewritten, optimized queries in a flat list.
-    *   For each original query, you can generate **up to 2** new queries.
-    *   If an original query is already very specific and high-quality, you may return just one rewritten query or even the original query itself.
-3.  **Negative Constraint:**
-    *   **Do not** simply add synonyms or reorder words. The goal is semantic evolution, not trivial rephrasing.
-</Execution Rules>
+1. Output format: Flat list of rewritten queries only (no explanations)
+2. For each original query, generate 1-2 rewritten queries
+3. If original is already optimal keyword format, return as-is
+4. Target 3-8 words per query; up to 12 for complex multi-concept queries
 
 <Queries to Refine>
 {queries_to_refine}
 </Queries to Refine>
-
 """
 
 results_filter_instruction = """You are an expert "Search Quality Rater."  Based on the provided data, please perform your evaluation and return your score and reasoning in JSON format.
@@ -190,11 +201,16 @@ Your mission is to critically evaluate if the provided `<Existing Information>` 
     *   These queries should be precise and build upon the existing information, not simply repeat or rephrase the original query.
 </Action Protocol>
 
-<Language Protocol>
-*   Adhere strictly to the language rule:
-*   If the query's subject is primarily **related to Taiwan, use Traditional Chinese**.
-*   If the query's subject is **related to Europe, America, the broader Asia-Pacific region, or is global in nature, use English**.
-</Language Protocol>
+<Follow-up Query Format Rules>
+- **Use KEYWORD format, not sentences** (target 3-8 words; up to 12 for complex multi-concept queries)
+- Format: [Entity] [Concept] [Time?]
+- Examples: "台積電 N3 良率 2023 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
+
+<Language Rules>
+- Taiwan-only topics: Traditional Chinese
+- Global/US/Europe/Asia topics: English
+</Language Rules>
+</Follow-up Query Format Rules>
 
 <Original Query>
 {query}

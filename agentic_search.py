@@ -4,9 +4,12 @@ import logging
 from typing import List, Set, TypedDict
 
 # Load configurations
+import pathlib
+
 import omegaconf
 
-config = omegaconf.OmegaConf.load("report_config.yaml")
+_HERE = pathlib.Path(__file__).parent
+config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
 
 LIGHT_MODEL_NAME = config["LIGHT_MODEL_NAME"]
 BACKUP_LIGHT_MODEL_NAME = config["BACKUP_LIGHT_MODEL_NAME"]
