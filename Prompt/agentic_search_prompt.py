@@ -43,7 +43,7 @@ For each query in the `<Queries to Refine>` list, rewrite as **keyword-based sea
 </Mission>
 
 <Query Format>
-- Use KEYWORDS, not sentences (3-8 tokens max)
+- Use KEYWORDS, not sentences (target 3-8 words; up to 12 for complex multi-concept queries)
 - Format: [Entity] [Concept] [Time?]
 - Examples: "台積電 N3 良率 2023 Q4" | "US CPI December 2023"
 </Query Format>
@@ -79,7 +79,7 @@ Futures:
 1. Output format: Flat list of rewritten queries only (no explanations)
 2. For each original query, generate 1-2 rewritten queries
 3. If original is already optimal keyword format, return as-is
-4. Max 8 tokens per query
+4. Target 3-8 words per query; up to 12 for complex multi-concept queries
 
 <Queries to Refine>
 {queries_to_refine}
@@ -202,14 +202,15 @@ Your mission is to critically evaluate if the provided `<Existing Information>` 
 </Action Protocol>
 
 <Follow-up Query Format Rules>
-- **Use KEYWORD format, not sentences** (3-8 tokens max)
+- **Use KEYWORD format, not sentences** (target 3-8 words; up to 12 for complex multi-concept queries)
 - Format: [Entity] [Concept] [Time?]
-- Examples: "台積電 N3 良率 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
+- Examples: "台積電 N3 良率 2023 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
 
 <Language Rules>
 - Taiwan-only topics: Traditional Chinese
 - Global/US/Europe/Asia topics: English
 </Language Rules>
+</Follow-up Query Format Rules>
 
 <Original Query>
 {query}

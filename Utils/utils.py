@@ -226,7 +226,7 @@ class ContentExtractor(object):
             )
             return_res = deepcopy(res)
             return_res.metadata["content"] = expanded_content
-            info.append(res)
+            info.append(return_res)
         return info
 
 

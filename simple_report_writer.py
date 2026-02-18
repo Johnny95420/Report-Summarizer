@@ -6,8 +6,12 @@ from dotenv import load_dotenv
 load_dotenv(".env")
 from typing import Literal
 
+import pathlib
+
 import omegaconf
-from langchain_community.chat_models import ChatLiteLLM
+
+_HERE = pathlib.Path(__file__).parent
+from langchain_litellm import ChatLiteLLM
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -21,7 +25,7 @@ from State.simple_state import RAGState, RAGStateInput
 from Tools.simple_tools import (final_judge_formatter, queries_formatter,
                                 scores_formatter)
 
-config = omegaconf.OmegaConf.load("report_config.yaml")
+config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
 MODEL_NAME = config["MODEL_NAME"]
 VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
 

@@ -6,9 +6,12 @@ import logging
 import sqlite3
 from typing import Literal
 
+import pathlib
+
 import omegaconf
 
-config = omegaconf.OmegaConf.load("report_config.yaml")
+_HERE = pathlib.Path(__file__).parent
+config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
 PROMPT_STYLE = config["PROMPT_STYLE"]
 
 PLANNER_MODEL_NAME = config["PLANNER_MODEL_NAME"]
@@ -28,11 +31,29 @@ BACKUP_CONCLUDE_MODEL_NAME = config["BACKUP_CONCLUDE_MODEL_NAME"]
 
 DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
 if PROMPT_STYLE == "research":
-    from Prompt.technical_research_prompt import *
+    from Prompt.technical_research_prompt import (
+        report_planner_query_writer_instructions,
+        report_planner_instructions,
+        query_writer_instructions,
+        section_writer_instructions,
+        section_grader_instructions,
+        final_section_writer_instructions,
+        refine_section_instructions,
+        content_refinement_instructions,
+    )
 elif PROMPT_STYLE == "industry":
-    from Prompt.industry_prompt import *
+    from Prompt.industry_prompt import (
+        report_planner_query_writer_instructions,
+        report_planner_instructions,
+        query_writer_instructions,
+        section_writer_instructions,
+        section_grader_instructions,
+        final_section_writer_instructions,
+        refine_section_instructions,
+        content_refinement_instructions,
+    )
 else:
-    raise ValueError("Only support indutry and technical_research prompt template")
+    raise ValueError("Only support industry and technical_research prompt template")
 
 from langchain_community.callbacks.infino_callback import get_num_tokens
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -75,10 +96,10 @@ from Utils.utils import (
 
 
 logger = logging.getLogger("AgentLogger")
-logger.setLevel(logging.ERROR)
+logger.setLevel(logging.INFO)
 
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.ERROR)
+console_handler.setLevel(logging.INFO)
 
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
@@ -452,6 +473,7 @@ def _prepare_source_for_writing(state: SectionState) -> str:
             section_topic=section.description,
             context=source_str,
             section_content=section.content or "",
+            follow_up_queries=_format_follow_up_questions(state.get("follow_up_queries")),
         )
         num_tokens = get_num_tokens(system_instructions, "gpt-4o-mini")
         num_retries += 1

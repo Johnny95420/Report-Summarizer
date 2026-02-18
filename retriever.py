@@ -87,7 +87,10 @@ def process_document(name, date, information):
 
 
 # %%
-config = omegaconf.OmegaConf.load("retriever_config.yaml")
+import pathlib
+
+_HERE = pathlib.Path(__file__).parent
+config = omegaconf.OmegaConf.load(_HERE / "retriever_config.yaml")
 files = []
 if config["raw_file_path"] is not None:
     for f in config["raw_file_path"]:

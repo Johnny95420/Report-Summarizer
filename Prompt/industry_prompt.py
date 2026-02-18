@@ -87,15 +87,14 @@ Your goal is to generate {number_of_queries} search queries that will help gathe
 </Task>
 
 <Query Format>
-- Use KEYWORDS, not sentences (3-8 tokens max)
+- Use KEYWORDS, not sentences (target 3-8 words; up to 12 for complex multi-concept queries)
 - Format: [Entity] [Concept] [Time?]
-- Examples: "台積電 N3 良率 2023 Q4" | "US CPI December 2023"
+- Examples: "台積電 N3 良率 2023 Q4" | "US CPI December 2023" | "Nvidia H100 supply chain bottleneck impact hyperscaler capex 2024"
 </Query Format>
 
 <Query Strategy>
 - Generate queries that examine different aspects of the topic
 - Use layered approach: broad → focused → financial/technical
-- Max 8 tokens per query
 
 <Language Rules>
 - Taiwan-only topics: Traditional Chinese
@@ -247,7 +246,7 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
 
     *Targeted Search Queries for Improvement (Mandatory if any weaknesses are identified or if the section is not 'exemplary'):*
         * Based on the **explicitly identified weaknesses, gaps, or areas needing more depth**, generate highly specific search queries designed to gather the exact missing information or to deepen the underdeveloped aspects of the analysis.
-        * **Query Format Requirements**: Use KEYWORD format, not sentences (3-8 tokens max). Format: [Entity] [Concept] [Time?]. Examples: "台積電 N3 良率 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
+        * **Query Format Requirements**: Use KEYWORD format, not sentences (target 3-8 words; up to 12 for complex multi-concept queries). Format: [Entity] [Concept] [Time?]. Examples: "台積電 N3 良率 2023 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
         * These queries should be phrases suitable for effective web searching (e.g., for academic databases, financial news, industry reports); avoid being overly declarative or too broad.
 
 2.  **Hypothetical & Exploratory Queries for Broader Context (Generate these always):**
@@ -453,9 +452,9 @@ For "content":
 
 <Query Requirements>
 Generate **{number_of_queries}** targeted queries to fill explicit gaps you flagged in the content and to deepen analysis:
-1) **Query Format**: Use KEYWORD format, not sentences (3-8 tokens max)
+1) **Query Format**: Use KEYWORD format, not sentences (target 3-8 words; up to 12 for complex multi-concept queries)
    - Format: [Entity] [Concept] [Time?]
-   - Examples: "台積電 N3 良率 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
+   - Examples: "台積電 N3 良率 2023 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
 2) Each query must map to a concrete missing data point, validation need, or analytical deepening you identified.
 3) Cover multiple angles as needed: statistics, regulations/policy, financial disclosures, industry reports, technical specs/standards, benchmarks/peers, and risk events (as applicable).
 4) Language rules:
@@ -472,7 +471,7 @@ Generate **{number_of_queries}** targeted queries to fill explicit gaps you flag
     - The `refined_description` output contains **only the additions or corrections**, not the full original description.
     - The additions do not repeat information already present in the original description. If no new information can be added, the output is an empty string.
     - If an inconsistency was found, the output starts with a **"Correction Note:"** paragraph.
-    - The additions integrate context from the full report, clarify background details (events, names, timepoints), and provide deeper, more comprehensive guidance for the section.
+    - The description integrates context from the full report, clarifies background details (events, names, timepoints), and provides deeper, more comprehensive guidance for the section.
     - The guidance clearly defines the analysis to be performed and the data required, using quantitative framing where appropriate.
 - **Content Output**:
     - The `refined_content` is a comprehensive, well-structured, and **factually sound** narrative that aligns with the refined description.
