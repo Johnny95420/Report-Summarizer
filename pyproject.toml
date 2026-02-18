@@ -1,3 +1,6 @@
+[tool.poetry]
+package-mode = false
+
 [project]
 name = "pdf-parser"
 version = "0.1.0"
@@ -18,6 +21,7 @@ dependencies = [
     "langchain-community",
     "langchain-core",
     "langgraph",
+    "langgraph-checkpoint-sqlite",
     "langchain-huggingface",
     "langchain-litellm",
     "langchain-classic",
@@ -45,13 +49,22 @@ dependencies = [
 
     # Storage
     "minio",
+
+    # Report export (no torch dependency chain)
+    "markdown2",
+    "weasyprint",
 ]
 
 [project.optional-dependencies]
-# ML/Audio packages — torch provided by container, install with: pip install --no-deps funasr marker-pdf
+# ML packages have torch in their dep tree — installing via poetry WILL override
+# NGC's custom PyTorch build. Install these via pip in the Dockerfile instead.
+# See Dockerfile for exact install commands.
 ml = [
-    "funasr",
+    "sentence-transformers",
     "marker-pdf",
+    "funasr",
+    "kaldiio",
+    "torch-complex",
 ]
 dev = ["ipython"]
 
