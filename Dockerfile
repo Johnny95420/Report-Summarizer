@@ -16,6 +16,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && npm install -g md-to-pdf \
     && rm -rf /var/lib/apt/lists/*
 
+# SSH config — .ssh is mounted read-only, write known_hosts to /tmp
+RUN mkdir -p /root/.ssh && printf 'UserKnownHostsFile /tmp/known_hosts\nStrictHostKeyChecking accept-new\n' > /etc/ssh/ssh_config.d/container.conf
+
 # Claude Code
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.local/bin:${PATH}"

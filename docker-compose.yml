@@ -11,7 +11,7 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
       - /home/johnny420/Desktop/pdf_parser:/root/pdf_parser
-      - /home/johnny420/.ssh:/root/.ssh
+      - /home/johnny420/.ssh:/root/.ssh:ro
     env_file:
       - /home/johnny420/Desktop/pdf_parser/.env
     shm_size: "8g"
