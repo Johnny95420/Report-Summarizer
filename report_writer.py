@@ -59,9 +59,8 @@ from langchain_community.callbacks.infino_callback import get_num_tokens
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.constants import Send
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
+from langgraph.types import Command, Send, interrupt
 
 from copy import deepcopy
 
@@ -791,7 +790,7 @@ class ReportGraphBuilder:
 
     def _build_section_graph(self) -> StateGraph:
         """Build the section subgraph (shared by sync/async)."""
-        section_builder = StateGraph(SectionState, output=SectionOutputState)
+        section_builder = StateGraph(SectionState, output_schema=SectionOutputState)
         section_builder.add_node("generate_queries", generate_queries)
         section_builder.add_node("search_db", search_db)
         section_builder.add_node("write_section", write_section)
@@ -805,7 +804,7 @@ class ReportGraphBuilder:
     def _build_main_graph(self, section_graph: StateGraph) -> StateGraph:
         """Build the main report graph (shared by sync/async)."""
         builder = StateGraph(
-            ReportState, input=ReportStateInput, output=ReportStateOutput
+            ReportState, input_schema=ReportStateInput, output_schema=ReportStateOutput
         )
         builder.add_node("generate_report_plan", generate_report_plan)
         builder.add_node("human_feedback", human_feedback)

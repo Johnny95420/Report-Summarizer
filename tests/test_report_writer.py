@@ -104,3 +104,28 @@ class TestTypos:
         assert "indutry" not in source.lower(), (
             '"indutry" typo still present in report_writer.py'
         )
+
+
+class TestLangGraphDeprecations:
+    """Ensure deprecated LangGraph APIs are not used."""
+
+    def test_send_imported_from_langgraph_types(self):
+        source = (ROOT / "report_writer.py").read_text()
+        assert "from langgraph.constants import Send" not in source, (
+            "Send should be imported from langgraph.types, not langgraph.constants"
+        )
+
+    def test_state_graph_uses_schema_kwargs(self):
+        source = (ROOT / "report_writer.py").read_text()
+        tree = ast.parse(source)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id == "StateGraph":
+                    kw_names = {kw.arg for kw in node.keywords}
+                    assert "input" not in kw_names, (
+                        "StateGraph uses deprecated 'input' kwarg; use 'input_schema'"
+                    )
+                    assert "output" not in kw_names, (
+                        "StateGraph uses deprecated 'output' kwarg; use 'output_schema'"
+                    )

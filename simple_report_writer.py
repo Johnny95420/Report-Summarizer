@@ -1,19 +1,16 @@
-import os
-import pprint
-
 from dotenv import load_dotenv
 
 load_dotenv(".env")
+
+import os
+import pathlib
+import pprint
 from typing import Literal
 
-import pathlib
-
 import omegaconf
-
-_HERE = pathlib.Path(__file__).parent
-from langchain_litellm import ChatLiteLLM
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_litellm import ChatLiteLLM
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
@@ -25,6 +22,7 @@ from State.simple_state import RAGState, RAGStateInput
 from Tools.simple_tools import (final_judge_formatter, queries_formatter,
                                 scores_formatter)
 
+_HERE = pathlib.Path(__file__).parent
 config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
 MODEL_NAME = config["MODEL_NAME"]
 VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
