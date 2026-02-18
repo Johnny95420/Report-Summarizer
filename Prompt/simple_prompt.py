@@ -5,10 +5,10 @@ query_writer_instructions = """You are an expert financial and investment writer
 </Topic>
 
 <Task>
-Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information above the section topic. 
+Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information above the section topic.
 
 The queries should:
-1. Be related to the topic 
+1. Be related to the topic
 2. Examine different aspects of the topic
 3. The output of queries should in the python list format
 4. Generate traditional chinese queries only.
@@ -109,20 +109,20 @@ section_grader_instructions = """You are reviewing a report section based on the
 
 
 <Task>
-1. Evaluate whether the content sufficiently and accurately addresses the specified topic. Assess the section from three perspectives: 
-- Technical accuracy 
-- Financial correctness 
+1. Evaluate whether the content sufficiently and accurately addresses the specified topic. Assess the section from three perspectives:
+- Technical accuracy
+- Financial correctness
 - Investment analysis depth
 
 2. If the section fails to meet any of these criteria, generate specific follow-up search queries in Traditional Chinese to gather the missing information.
 
 3. In addition to addressing the original question, create hypothetical or exploratory queries in Traditional Chinese that could assist in horizontally integrating related information about the topic.
-Hypothetical or exploratory queries aim to enhance the comprehensiveness of the report by exploring factors 
+Hypothetical or exploratory queries aim to enhance the comprehensiveness of the report by exploring factors
 - macroeconomic trends
 - political environment
 - regulatory frameworks
 - industry structure
 - emerging technologies
-- geopolitical risks and their potential impacts on the topic 
+- geopolitical risks and their potential impacts on the topic
 </Task>
 """

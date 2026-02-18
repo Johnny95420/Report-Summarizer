@@ -4,16 +4,15 @@ import json
 import os
 import re
 from io import StringIO
-from typing import List
 
 import pandas as pd
 from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.tools import tool
 from markdown_it import MarkdownIt
 from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
 from marker.output import text_from_rendered
-from langchain_core.tools import tool
 from omegaconf import OmegaConf
 
 config = OmegaConf.load("report_config.yaml")
@@ -69,9 +68,7 @@ def research_metadata_formatter(
     }
 
 
-async def table_summarization(
-    model_name, file_name, context_heading, context_paragraph, table
-):
+async def table_summarization(model_name, file_name, context_heading, context_paragraph, table):
     system_instructions = """
     You are an expert at summarizing the key content of tables and describing their contents.
 
@@ -86,7 +83,7 @@ async def table_summarization(
     - Your descriptive style should be similar to the following examples:
     1. This is a table that compares different models on the XXX task. The table includes four models: A, B, C, and D, and the aspects being compared are the alpha and beta tasks.
     2. This is a financial statement for a specific company for a given year and month. The financial statement includes the contents A, B, C, D, and E.
-    3. This is a table comparing companies A, B, and C. The table's content includes a comparison of aspects such as alpha, beta, and gamma. 
+    3. This is a table comparing companies A, B, and C. The table's content includes a comparison of aspects such as alpha, beta, and gamma.
     - You should summarize table in Traditional Chinese.
     </Task>
 
@@ -94,7 +91,7 @@ async def table_summarization(
     - The word count should be under 500 words.
     - You should summarize the specific and important information mentioned in the table.
     - Do not over-emphasize detailed content, such as specific numbers.
-    - The style needs to be suitable for Retrieval-Augmented Generation (RAG). 
+    - The style needs to be suitable for Retrieval-Augmented Generation (RAG).
     - Summarize table in Traditional Chinese.
     </Limit>
     """
@@ -110,11 +107,7 @@ async def table_summarization(
     writer_model = ChatLiteLLM(model=model_name, temperature=0)
     output = await writer_model.ainvoke(
         [SystemMessage(content=system_instructions.format(table=table))]
-        + [
-            HumanMessage(
-                content="Please help me to summarize this table into description for doing RAG."
-            )
-        ]
+        + [HumanMessage(content="Please help me to summarize this table into description for doing RAG.")]
     )
     return output.content
 
@@ -150,22 +143,14 @@ async def financial_report_metadata_extraction(model_name, file_name, content):
     )
     output = await tool_model.ainvoke(
         [SystemMessage(content=system_instructions.format(content=content))]
-        + [
-            HumanMessage(
-                content="Please help me to summarize this table into description for doing RAG."
-            )
-        ]
+        + [HumanMessage(content="Please help me to summarize this table into description for doing RAG.")]
     )
     try:
         return output.tool_calls[0]["args"]
-    except Exception as e:
+    except Exception:
         output = await tool_model.ainvoke(
             [SystemMessage(content=system_instructions.format(content=content))]
-            + [
-                HumanMessage(
-                    content="Please help me to summarize this table into description for doing RAG."
-                )
-            ]
+            + [HumanMessage(content="Please help me to summarize this table into description for doing RAG.")]
         )
         return output.tool_calls[0]["args"]
 
@@ -197,11 +182,7 @@ async def research_paper_metadata_extraction(model_name, file_name, content):
     )
     output = await tool_model.ainvoke(
         [SystemMessage(content=system_instructions.format(content=content))]
-        + [
-            HumanMessage(
-                content="Please help me to summarize this table into description for doing RAG."
-            )
-        ]
+        + [HumanMessage(content="Please help me to summarize this table into description for doing RAG.")]
     )
     return output.tool_calls[0]["args"]
 
@@ -224,10 +205,10 @@ metadata_extraction = mapping_table[config["PROMPT_STYLE"]]
 keys = keys_mapping_table[config["PROMPT_STYLE"]]
 
 
-class PDFProcessor(object):
+class PDFProcessor:
     def __init__(
         self,
-        files: List[str],
+        files: list[str],
         target_folder: str,
         do_extract_table: bool = True,
         model_name: str = "deepseek/deepseek-chat",
@@ -276,9 +257,7 @@ class PDFProcessor(object):
                     start_line, end_line = token.map
                     table_content = "\n".join(lines[start_line:end_line])
                     html_table = md.render(table_content)
-                    json_table = pd.read_html(StringIO(html_table))[0].to_dict(
-                        orient="records"
-                    )
+                    pd.read_html(StringIO(html_table))[0].to_dict(orient="records")
                     results.append(
                         {
                             "context_heading": context_heading,
@@ -288,12 +267,8 @@ class PDFProcessor(object):
                     )
         return results
 
-    async def summarize_table(
-        self, file_name, context_heading, context_paragraph, table
-    ):
-        summary_text = await table_summarization(
-            self.model_name, file_name, context_heading, context_paragraph, table
-        )
+    async def summarize_table(self, file_name, context_heading, context_paragraph, table):
+        summary_text = await table_summarization(self.model_name, file_name, context_heading, context_paragraph, table)
         return summary_text
 
     async def metadata_extraction(self, file_name, content):

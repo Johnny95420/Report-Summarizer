@@ -1,9 +1,6 @@
 """Tests for report_writer.py"""
 
 import ast
-from pathlib import Path
-
-import pytest
 
 from .conftest import ROOT, find_function
 
@@ -44,13 +41,9 @@ class TestPrepareSourceForWriting:
                     keywords = {kw.arg for kw in node.keywords}
                     format_calls.append(keywords)
 
-        assert len(format_calls) >= 2, (
-            f"Expected >=2 format calls (initial + loop), got {len(format_calls)}"
-        )
+        assert len(format_calls) >= 2, f"Expected >=2 format calls (initial + loop), got {len(format_calls)}"
         for idx, kw_set in enumerate(format_calls):
-            assert "follow_up_queries" in kw_set, (
-                f"format() call #{idx} missing follow_up_queries keyword"
-            )
+            assert "follow_up_queries" in kw_set, f"format() call #{idx} missing follow_up_queries keyword"
 
 
 class TestLoggerLevel:
@@ -101,9 +94,7 @@ class TestExplicitPromptImports:
 class TestTypos:
     def test_no_indutry_typo(self):
         source = (ROOT / "report_writer.py").read_text()
-        assert "indutry" not in source.lower(), (
-            '"indutry" typo still present in report_writer.py'
-        )
+        assert "indutry" not in source.lower(), '"indutry" typo still present in report_writer.py'
 
 
 class TestLangGraphDeprecations:
@@ -123,9 +114,5 @@ class TestLangGraphDeprecations:
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 if node.func.id == "StateGraph":
                     kw_names = {kw.arg for kw in node.keywords}
-                    assert "input" not in kw_names, (
-                        "StateGraph uses deprecated 'input' kwarg; use 'input_schema'"
-                    )
-                    assert "output" not in kw_names, (
-                        "StateGraph uses deprecated 'output' kwarg; use 'output_schema'"
-                    )
+                    assert "input" not in kw_names, "StateGraph uses deprecated 'input' kwarg; use 'input_schema'"
+                    assert "output" not in kw_names, "StateGraph uses deprecated 'output' kwarg; use 'output_schema'"
