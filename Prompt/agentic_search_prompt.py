@@ -1,4 +1,3 @@
-
 iteration_budget_instruction = """You are an expert Search Strategy Analyst. Your role is to determine the optimal research depth for a given set of queries by assigning an 'iteration budget'. This budget controls how many cycles of searching and analysis are performed.
 
 <Task>

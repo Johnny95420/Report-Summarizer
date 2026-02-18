@@ -1,7 +1,5 @@
 """Tests for project configuration (pyproject.toml, config loading patterns)."""
 
-from pathlib import Path
-
 import pytest
 
 from .conftest import ROOT
@@ -10,9 +8,7 @@ from .conftest import ROOT
 class TestDependencies:
     def test_langchain_classic_in_pyproject(self):
         source = (ROOT / "pyproject.toml").read_text()
-        assert "langchain-classic" in source, (
-            "langchain-classic not declared in pyproject.toml"
-        )
+        assert "langchain-classic" in source, "langchain-classic not declared in pyproject.toml"
 
 
 class TestConfigPaths:
@@ -27,6 +23,4 @@ class TestConfigPaths:
     @pytest.mark.parametrize("filename", FILES_TO_CHECK)
     def test_pathlib_used_for_config(self, filename):
         source = (ROOT / filename).read_text()
-        assert "Path(__file__).parent" in source, (
-            f"{filename} does not use Path(__file__).parent for config loading"
-        )
+        assert "Path(__file__).parent" in source, f"{filename} does not use Path(__file__).parent for config loading"

@@ -1,20 +1,20 @@
+import atexit
 import threading
 import time
-import atexit
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+)
+from concurrent.futures import (
+    TimeoutError as ExecutorTimeout,
+)
 from queue import Queue
-from typing import List, Optional
 
 import trafilatura
+import undetected_chromedriver as uc
 import uvicorn
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, Query
-from concurrent.futures import (
-    ThreadPoolExecutor,
-    TimeoutError as ExecutorTimeout,
-    as_completed,
-)
-import psutil
-import undetected_chromedriver as uc
 
 
 # =========================
@@ -148,9 +148,7 @@ def search(query, time_filter: str = "year", timeout=5):
             try:
                 future.result(timeout=timeout)
             except ExecutorTimeout:
-                print(
-                    f"[Search Error] driver.get() timeout after {timeout}s at {base_url}"
-                )
+                print(f"[Search Error] driver.get() timeout after {timeout}s at {base_url}")
                 raise Exception(f"driver.get() timeout after {timeout}s")
 
         with ThreadPoolExecutor(max_workers=1) as executor:
@@ -159,7 +157,7 @@ def search(query, time_filter: str = "year", timeout=5):
                 page_source = future.result(timeout=5)
             except ExecutorTimeout:
                 print(f"[Search Error] driver.page_source timeout at {base_url}")
-                raise Exception(f"driver.page_source timeout")
+                raise Exception("driver.page_source timeout")
 
     except Exception as e:
         print(f"[Search Error] {e}")
@@ -188,9 +186,7 @@ def search(query, time_filter: str = "year", timeout=5):
 # Parse Content Function
 # =========================
 def parse_content(html):
-    return trafilatura.extract(
-        html, include_comments=True, include_tables=True, output_format="markdown"
-    )
+    return trafilatura.extract(html, include_comments=True, include_tables=True, output_format="markdown")
 
 
 # =========================
@@ -209,9 +205,7 @@ def crawl_url(result, result_queue, timeout=10):
             try:
                 future.result(timeout=timeout)
             except ExecutorTimeout:
-                print(
-                    f"[Crawl Error] driver.get() timeout after {timeout}s at {result['url']}"
-                )
+                print(f"[Crawl Error] driver.get() timeout after {timeout}s at {result['url']}")
                 raise Exception(f"driver.get() timeout after {timeout}s")
 
         with ThreadPoolExecutor(max_workers=1) as executor:
@@ -220,7 +214,7 @@ def crawl_url(result, result_queue, timeout=10):
                 page_source = future.result(timeout=5)
             except ExecutorTimeout:
                 print(f"[Crawl Error] driver.page_source timeout at {result['url']}")
-                raise Exception(f"driver.page_source timeout")
+                raise Exception("driver.page_source timeout")
 
         result["raw_content"] = parse_content(page_source)
         result["crawl_time"] = time.time() - start_time
@@ -253,9 +247,7 @@ def crawl_search_results(search_results, max_threads=3, timeout=8):
         return result_queue.get()
 
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
-        future_to_result = {
-            executor.submit(crawl_worker, result): result for result in search_results
-        }
+        future_to_result = {executor.submit(crawl_worker, result): result for result in search_results}
 
         for future in as_completed(future_to_result):
             result = future_to_result[future]
@@ -273,9 +265,7 @@ def crawl_search_results(search_results, max_threads=3, timeout=8):
                 result["error"] = str(e)
                 updated_results.append(result)
 
-    updated_results.sort(
-        key=lambda x: [r["url"] for r in search_results].index(x["url"])
-    )
+    updated_results.sort(key=lambda x: [r["url"] for r in search_results].index(x["url"]))
     return updated_results
 
 
@@ -299,9 +289,7 @@ def search_and_crawl(
         retry += 1
 
     if include_raw_content:
-        search_results = crawl_search_results(
-            search_results, max_threads=MAX_DRIVERS, timeout=timeout
-        )
+        search_results = crawl_search_results(search_results, max_threads=MAX_DRIVERS, timeout=timeout)
 
     return {"results": search_results}
 

@@ -7,15 +7,14 @@ APIs mocked out, verifying that:
   - The final report contains content from every section
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Mock LLM helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_llm_response(tool=None, **extra):
     """Build a fake LLM response whose shape matches the caller's expectation.
@@ -29,9 +28,7 @@ def _make_llm_response(tool=None, **extra):
         tool_names = {t.name for t in tool}
 
         if "queries_formatter" in tool_names:
-            resp.tool_calls = [
-                {"args": {"thought": "mock", "queries": ["mock query 1"]}}
-            ]
+            resp.tool_calls = [{"args": {"thought": "mock", "queries": ["mock query 1"]}}]
 
         elif "section_formatter" in tool_names:
             resp.tool_calls = [
@@ -54,14 +51,10 @@ def _make_llm_response(tool=None, **extra):
             ]
 
         elif "feedback_formatter" in tool_names:
-            resp.tool_calls = [
-                {"args": {"grade": "pass", "follow_up_queries": []}}
-            ]
+            resp.tool_calls = [{"args": {"grade": "pass", "follow_up_queries": []}}]
 
         elif "content_refinement_formatter" in tool_names:
-            resp.tool_calls = [
-                {"args": {"refined_content": "Refined mock content."}}
-            ]
+            resp.tool_calls = [{"args": {"refined_content": "Refined mock content."}}]
 
         else:
             resp.content = "Mock LLM output."
@@ -83,6 +76,7 @@ async def _mock_call_llm_async(_model, _backup, prompt, *, tool=None, tool_choic
 # ---------------------------------------------------------------------------
 # Integration test
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_industry_report_end_to_end():
@@ -139,9 +133,7 @@ async def test_industry_report_end_to_end():
 
             # Phase 2: resume with approval
             final_report = None
-            async for event in graph.astream(
-                Command(resume=True), config, stream_mode="updates"
-            ):
+            async for event in graph.astream(Command(resume=True), config, stream_mode="updates"):
                 if "compile_final_report" in event:
                     final_report = event["compile_final_report"].get("final_report")
 

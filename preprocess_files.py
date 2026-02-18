@@ -4,7 +4,6 @@ import dotenv
 dotenv.load_dotenv(".env")
 import glob
 
-from Utils.audio_processor import AudioTranscription
 from Utils.pdf_processor import PDFProcessor
 
 # %%

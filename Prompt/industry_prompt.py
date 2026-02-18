@@ -14,7 +14,7 @@ report_planner_query_writer_instructions = (
 </Report organization>
 
 <Task>
-Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information for planning the report sections. 
+Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information for planning the report sections.
 
 The queries should:
 
@@ -36,7 +36,7 @@ Here is feedback on the report structure from review (if any):
 
 report_planner_instructions = (
     """I want a plan for a report.
-The more detailed and complete the information in this report, the better. 
+The more detailed and complete the information in this report, the better.
 The timing may be important for certain sections of this report. Please double-check carefully.
 
 
@@ -62,12 +62,12 @@ The topic of the report is:
 </Topic>
 
 <Report organization>
-The report should follow this organization: 
+The report should follow this organization:
 {report_organization}
 </Report organization>
 
 <Context>
-Here is context to use to plan the sections of the report: 
+Here is context to use to plan the sections of the report:
 {context}
 </Context>
 
@@ -135,7 +135,7 @@ Your job is to craft a section of a professional report that is clear, logically
   * Either a focused table (using Markdown table syntax) for
     - Comparing key items
     - Finanacial information
-    - Quantitative information  
+    - Quantitative information
   * Or a list using proper Markdown list syntax:
     - Use `*` or `-` for unordered lists
     - Use `1.` for ordered lists
@@ -327,14 +327,14 @@ For Conclusion/Summary:
     * Must include a focused comparison table using Markdown table syntax
     * Table should distill insights from the report
     * Keep table entries clear and concise
-- For non-comparative reports: 
+- For non-comparative reports:
     * Only use structural element IF it helps distill the points made in the report:
     * Either a focused table comparing items present in the report (using Markdown table syntax)
     * Or a short list using proper Markdown list syntax:
       - Use `*` or `-` for unordered lists
       - Use `1.` for ordered lists
       - Ensure proper indentation and spacing
-- End with specific next steps or implications 
+- End with specific next steps or implications
 - No sources section needed
 
 3. Writing Approach:
@@ -349,7 +349,7 @@ For Conclusion/Summary:
 - Do not include word count or any preamble in your response
 </Quality Checks>
 
-<Section topic> 
+<Section topic>
 {section_topic}
 </Section topic>
 
