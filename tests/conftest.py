@@ -20,7 +20,6 @@ ROOT = Path(__file__).resolve().parent.parent
 # ---------------------------------------------------------------------------
 FAKE_CONFIG = {
     # report_writer / agentic_search model config
-    "PROMPT_STYLE": "industry",
     "PLANNER_MODEL_NAME": "test-model",
     "BACKUP_PLANNER_MODEL_NAME": "test-model",
     "VERIFY_MODEL_NAME": "test-model",

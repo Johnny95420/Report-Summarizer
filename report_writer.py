@@ -11,7 +11,6 @@ import omegaconf
 
 _HERE = pathlib.Path(__file__).parent
 config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
-PROMPT_STYLE = config["PROMPT_STYLE"]
 
 PLANNER_MODEL_NAME = config["PLANNER_MODEL_NAME"]
 BACKUP_PLANNER_MODEL_NAME = config["BACKUP_PLANNER_MODEL_NAME"]
@@ -29,30 +28,17 @@ CONCLUDE_MODEL_NAME = config["CONCLUDE_MODEL_NAME"]
 BACKUP_CONCLUDE_MODEL_NAME = config["BACKUP_CONCLUDE_MODEL_NAME"]
 
 DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
-if PROMPT_STYLE == "research":
-    from Prompt.technical_research_prompt import (
-        content_refinement_instructions,
-        final_section_writer_instructions,
-        query_writer_instructions,
-        refine_section_instructions,
-        report_planner_instructions,
-        report_planner_query_writer_instructions,
-        section_grader_instructions,
-        section_writer_instructions,
-    )
-elif PROMPT_STYLE == "industry":
-    from Prompt.industry_prompt import (
-        content_refinement_instructions,
-        final_section_writer_instructions,
-        query_writer_instructions,
-        refine_section_instructions,
-        report_planner_instructions,
-        report_planner_query_writer_instructions,
-        section_grader_instructions,
-        section_writer_instructions,
-    )
-else:
-    raise ValueError("Only support industry and technical_research prompt template")
+
+from Prompt.industry_prompt import (
+    content_refinement_instructions,
+    final_section_writer_instructions,
+    query_writer_instructions,
+    refine_section_instructions,
+    report_planner_instructions,
+    report_planner_query_writer_instructions,
+    section_grader_instructions,
+    section_writer_instructions,
+)
 
 from copy import deepcopy
 

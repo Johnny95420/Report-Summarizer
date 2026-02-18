@@ -13,9 +13,6 @@ from markdown_it import MarkdownIt
 from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
 from marker.output import text_from_rendered
-from omegaconf import OmegaConf
-
-config = OmegaConf.load("report_config.yaml")
 
 
 # %%
@@ -42,28 +39,6 @@ def financial_metadata_formatter(
         "investment_target": investment_target,
         "company_rating": company_rating,
         "price_target": price_target,
-        "report_highlights": report_highlights,
-    }
-
-
-@tool
-def research_metadata_formatter(
-    date: str,
-    institution: str,
-    report_highlights: str,
-):
-    """Summary
-    This is a tool to format the response.
-    The content of the response needs to include: report date, institution, and report highlights.
-    Args:
-        date: The publication date of the report. If not mentioned, please use "None".
-        institution: The research institution or team that published the article or paper. If not mentioned, please use "None".
-        report_highlights: Please summarize the first 5000 words into a summary of approximately 100 words.
-    """
-    return {
-        "date": date,
-        "institution": institution,
-        "company_rating": institution,
         "report_highlights": report_highlights,
     }
 
@@ -155,54 +130,14 @@ async def financial_report_metadata_extraction(model_name, file_name, content):
         return output.tool_calls[0]["args"]
 
 
-async def research_paper_metadata_extraction(model_name, file_name, content):
-    system_instructions = """
-    You are an expert in extracting metadata from investment reports.
-    I will provide you with the first 5000 words of a report.
-    Based on the content of these 5000 words, you need to extract the report date, institution, and report highlights for me.
-
-    <Content>
-    {content}
-    </Content>
-
-    <Task>
-    Your task is to extract key information from the beginning of the report, including:
-    - date: The publication date of the report. If not mentioned, please use "None".
-    - institution: The research institution or team that published the article or paper. If not mentioned, please use "None".
-    - report_highlights: Please summarize the first 5000 words into a summary of approximately 100 words.
-    </Task>
-
-    <Limit>
-    - If you can not get the information please feedback this term in None. Do not generate it by your self.
-    </Limit>
-    """
-    content = f"FileName:{file_name}" + "\n" + f"Content: {content}"
-    tool_model = ChatLiteLLM(model=model_name, temperature=0).bind_tools(
-        [research_metadata_formatter], tool_choice="required"
-    )
-    output = await tool_model.ainvoke(
-        [SystemMessage(content=system_instructions.format(content=content))]
-        + [HumanMessage(content="Please help me to summarize this table into description for doing RAG.")]
-    )
-    return output.tool_calls[0]["args"]
-
-
-mapping_table = {
-    "industry": financial_report_metadata_extraction,
-    "research": research_paper_metadata_extraction,
-}
-keys_mapping_table = {
-    "industry": [
-        "date",
-        "investment_target",
-        "company_rating",
-        "price_target",
-        "report_highlights",
-    ],
-    "research": ["date", "institution", "report_highlights"],
-}
-metadata_extraction = mapping_table[config["PROMPT_STYLE"]]
-keys = keys_mapping_table[config["PROMPT_STYLE"]]
+metadata_extraction = financial_report_metadata_extraction
+keys = [
+    "date",
+    "investment_target",
+    "company_rating",
+    "price_target",
+    "report_highlights",
+]
 
 
 class PDFProcessor:
