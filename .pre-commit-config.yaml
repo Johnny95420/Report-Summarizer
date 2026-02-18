@@ -1,0 +1,28 @@
+default_language_version:
+  python: python3.12
+
+repos:
+  # ── General file hygiene ────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace        # 移除行尾空白
+      - id: end-of-file-fixer          # 確保檔案以換行結尾
+      - id: check-yaml                 # 驗證 YAML 語法
+      - id: check-toml                 # 驗證 TOML 語法
+      - id: check-json                 # 驗證 JSON 語法
+        types: [json]
+      - id: check-added-large-files    # 防止提交大檔案
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict       # 偵測未解決的合併衝突標記
+      - id: detect-private-key         # 偵測意外提交的私鑰
+
+  # ── Ruff — Python linter & formatter ────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.1
+    hooks:
+      # Linter（先跑，--fix 可自動修正可修復的問題）
+      - id: ruff-check
+        args: [--fix]
+      # Formatter（後跑，格式化 linter 修正後的輸出）
+      - id: ruff-format
