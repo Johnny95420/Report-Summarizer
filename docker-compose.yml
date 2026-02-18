@@ -1,0 +1,20 @@
+services:
+  agent-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agent-dev:26.01
+    container_name: agent-dev
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - /home/johnny420/Desktop/pdf_parser:/root/pdf_parser
+      - /home/johnny420/.ssh:/root/.ssh
+    env_file:
+      - /home/johnny420/Desktop/pdf_parser/.env
+    shm_size: "8g"
+    stdin_open: true
+    tty: true
+    network_mode: host
