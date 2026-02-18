@@ -13,7 +13,6 @@ A modular and automated research report generation tool designed for **in-depth 
 - 🤖 **Diverse Workflows**:
     - **Deep Report Generation (`report_writer.py`)**: A full-fledged report writing process where multiple agents (Planner, Researcher, Writer, Reviewer) collaborate.
     - **Agentic Search (`agentic_search.py`)**: A standalone, agent-driven deep search module that dynamically generates follow-up questions for multi-step information exploration.
-    - **Simple Report Generation (`simple_report_writer.py`)**: A streamlined RAG process for quickly generating reports on a single topic.
 - 👤 **Human-in-the-Loop**: Supports user feedback to regenerate or revise the report plan.
 - 📑 **Parallel Processing**: Capable of generating multiple report sections simultaneously for efficient execution.
 - 🕸️ **Enhanced Web Scraping**: Uses `Selenium` for web content fetching, effectively handling dynamically loaded pages.
@@ -26,11 +25,10 @@ A modular and automated research report generation tool designed for **in-depth 
 | File/Folder             | Description                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------- |
 | `report_writer.py`      | **(Main)** Orchestrates multi-agent collaboration for planning and writing in-depth research reports using LangGraph. |
-| `simple_report_writer.py` | **(Secondary)** A simplified RAG pipeline for quickly generating a report on a single topic. |
 | `agentic_search.py`     | **(Core Module)** Implements the agentic search logic, enabling autonomous and iterative research. |
 | `preprocess_files.py`   | A script to run various preprocessing functions from `Utils`, such as handling PDF and audio files. |
 | `retriever.py`          | Implements the hybrid retriever, combining local vector search with keyword search. |
-| `Prompt/`               | Contains prompt templates for different report styles, such as industry analysis or technical research. |
+| `Prompt/`               | Contains prompt templates for the industry/stock analysis report style. |
 | `State/`                | Defines the state objects used in LangGraph, like `ReportState` and `SectionState`. |
 | `Tools/`                | Includes tools for formatting LLM outputs, such as query generation and feedback processing. |
 | `Utils/`                | Contains various utility functions, including web API wrappers, PDF/audio processors, and content deduplication. |
@@ -49,7 +47,6 @@ This file controls the core parameters of the report generator. Create it in the
 
 ```yaml
 # --- Example report_config.yaml ---
-PROMPT_STYLE: "industry" # or "research"
 PLANNER_MODEL_NAME: "gpt-4o"
 BACKUP_PLANNER_MODEL_NAME: "gpt-4o-mini"
 LIGHT_MODEL_NAME: "gpt-4o-mini"
@@ -185,27 +182,3 @@ for event in graph.stream(input_data, config, stream_mode="updates"):
         # Enter your feedback here to continue
 ```
 
-#### Simple Report (`simple_report_writer.py`)
-
-Use this script if you need to quickly generate a RAG-based report on a single topic.
-
-```python
-from simple_report_writer import graph
-from langchain_core.runnables import RunnableConfig
-
-# Configuration
-config = RunnableConfig({
-    "number_of_queries": 5,
-    "max_search_depth": 3,
-})
-topic = "Please analyze TSMC's financial report for Q1 2024"
-input_data = {"topic": topic}
-
-# Execute
-for event in graph.stream(input_data, config, stream_mode="values"):
-    # Streams updates until the final report is complete
-    final_answer = event.get("final_answer")
-    if final_answer:
-        with open("simple_report.md", "w") as f:
-            f.write(final_answer)
-```

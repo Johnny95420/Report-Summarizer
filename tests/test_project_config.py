@@ -20,7 +20,6 @@ class TestConfigPaths:
 
     FILES_TO_CHECK = [
         "report_writer.py",
-        "simple_report_writer.py",
         "agentic_search.py",
         "retriever.py",
     ]
