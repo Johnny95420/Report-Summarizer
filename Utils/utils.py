@@ -4,16 +4,15 @@ import math
 import os
 import time
 from copy import deepcopy
-from typing import List
 
 import requests
-from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
-from langchain_core.documents import Document
-from langchain_litellm import ChatLiteLLM
-from langchain_core.runnables import RunnableLambda
+from langchain_community.retrievers import BM25Retriever
 from langchain_community.vectorstores import Chroma
+from langchain_core.documents import Document
+from langchain_core.runnables import RunnableLambda
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_litellm import ChatLiteLLM
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from requests.adapters import HTTPAdapter
 from requests.exceptions import ConnectionError, RequestException, Timeout
@@ -24,7 +23,7 @@ from State.state import Section
 
 host = os.environ.get("SEARCH_HOST", None)
 port = os.environ.get("SEARCH_PORT", None)
-temp_files_path = os.environ.get("temp_dir", "./temp")
+temp_files_path = os.environ.get("TEMP_DIR", "./temp")
 os.makedirs(temp_files_path, exist_ok=True)
 tavily_client = TavilyClient()
 
@@ -60,9 +59,7 @@ logger.addHandler(console_handler)
 except_model_name = set(["o3-mini", "o4-mini", "gpt-5", "gpt-5-nano", "gpt-5-mini"])
 
 
-def call_llm(
-    model_name: str, backup_model_name: str, prompt: List, tool=None, tool_choice=None
-):
+def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, tool_choice=None):
     temperature = 1 if model_name in except_model_name else 0.5
     backup_temperature = 1 if backup_model_name in except_model_name else 0.5
 
@@ -75,9 +72,8 @@ def call_llm(
         primary = primary.bind_tools(tools=tool, tool_choice=tool_choice)
 
     def _validate_tool_calls(msg):
-        if tool and tool_choice == "required":
-            if not getattr(msg, "tool_calls", None):
-                raise ValueError("Required tool call missing")
+        if tool and tool_choice == "required" and not getattr(msg, "tool_calls", None):
+            raise ValueError("Required tool call missing")
         if not (getattr(msg, "content", None) or getattr(msg, "tool_calls", None)):
             raise ValueError("Empty model output")
         return msg
@@ -96,9 +92,7 @@ def call_llm(
     return model.invoke(prompt)
 
 
-async def call_llm_async(
-    model_name: str, backup_model_name: str, prompt: List, tool=None, tool_choice=None
-):
+async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, tool=None, tool_choice=None):
     temperature = 1 if model_name in except_model_name else 0.5
     backup_temperature = 1 if backup_model_name in except_model_name else 0.5
 
@@ -111,9 +105,8 @@ async def call_llm_async(
         primary = primary.bind_tools(tools=tool, tool_choice=tool_choice)
 
     def _validate_tool_calls(msg):
-        if tool and tool_choice == "required":
-            if not getattr(msg, "tool_calls", None):
-                raise ValueError("Required tool call missing")
+        if tool and tool_choice == "required" and not getattr(msg, "tool_calls", None):
+            raise ValueError("Required tool call missing")
         if not (getattr(msg, "content", None) or getattr(msg, "tool_calls", None)):
             raise ValueError("Empty model output")
         return msg
@@ -143,16 +136,10 @@ def track_expanded_context(
         desired_start_idx = max(0, start_idx - backward_capacity)
         desired_end_idx = min(len(original_context), end_idx + forward_capacity)
         start_boundary_pos = original_context.rfind("\n\n", 0, desired_start_idx)
-        if start_boundary_pos == -1:
-            final_start_idx = 0
-        else:
-            final_start_idx = start_boundary_pos + 2
+        final_start_idx = 0 if start_boundary_pos == -1 else start_boundary_pos + 2
 
         end_boundary_pos = original_context.find("\n\n", desired_end_idx)
-        if end_boundary_pos == -1:
-            final_end_idx = len(original_context)
-        else:
-            final_end_idx = end_boundary_pos
+        final_end_idx = len(original_context) if end_boundary_pos == -1 else end_boundary_pos
         expanded_context = original_context[final_start_idx:final_end_idx]
 
         return expanded_context
@@ -162,7 +149,7 @@ def track_expanded_context(
         return None
 
 
-class ContentExtractor(object):
+class ContentExtractor:
     def __init__(self, temp_dir=temp_files_path, k=3):
         self.k = k
         self.temp_dir = temp_dir
@@ -192,7 +179,7 @@ class ContentExtractor(object):
         )
         new_docs = []
         for file in files:
-            with open(file, "r") as f:
+            with open(file) as f:
                 texts = f.read()
             name = file.split("/")[-1].replace(".txt", "")
             new_docs.append(Document(texts, metadata={"path": name, "content": texts}))
@@ -221,9 +208,7 @@ class ContentExtractor(object):
             if res.page_content in seen:
                 continue
             seen.add(res.page_content)
-            expanded_content = track_expanded_context(
-                res.metadata["content"], res.page_content, 1500, 1000
-            )
+            expanded_content = track_expanded_context(res.metadata["content"], res.page_content, 1500, 1000)
             return_res = deepcopy(res)
             return_res.metadata["content"] = expanded_content
             info.append(return_res)
@@ -235,9 +220,9 @@ def format_human_feedback(feedbacks: list[str]) -> str:
     formatted_str = ""
     for idx, feedback in enumerate(feedbacks):
         formatted_str += f"""
-        {"="*60}
+        {"=" * 60}
         feedback {idx} : {feedback}
-        
+
         """
     return formatted_str
 
@@ -247,22 +232,22 @@ def format_sections(sections: list[Section]) -> str:
     formatted_str = ""
     for idx, section in enumerate(sections, 1):
         formatted_str += f"""
-        {'='*60}
+        {"=" * 60}
         Section {idx}: {section.name}
-        {'='*60}
+        {"=" * 60}
         Description:
         {section.description}
-        Requires Research: 
+        Requires Research:
         {section.research}
 
         Content:
-        {section.content if section.content else '[Not yet written]'}
+        {section.content if section.content else "[Not yet written]"}
 
         """
     return formatted_str
 
 
-def format_search_results(results: List[Document], char_limit: int = 500):
+def format_search_results(results: list[Document], char_limit: int = 500):
     formatted_text = "Sources:\n\n"
     if char_limit is None:
         char_limit = math.inf
@@ -273,16 +258,14 @@ def format_search_results(results: List[Document], char_limit: int = 500):
         raw_content = doc.page_content
         if len(raw_content) > char_limit:
             raw_content = raw_content[:char_limit] + "... [truncated]"
-            formatted_text += (
-                f"Full source content limited to {char_limit} chars: {raw_content}\n\n"
-            )
+            formatted_text += f"Full source content limited to {char_limit} chars: {raw_content}\n\n"
         else:
             formatted_text += f"{raw_content}\n\n"
 
     return formatted_text
 
 
-def format_search_results_with_metadata(results: List[Document]):
+def format_search_results_with_metadata(results: list[Document]):
     formatted_text = "Sources:\n\n"
     for doc in results:
         if "table" in doc.metadata:
@@ -357,9 +340,7 @@ def selenium_api_search(search_queries, include_raw_content: bool):
                 try:
                     output_data = output.json()
                 except json.JSONDecodeError as e:
-                    logger.error(
-                        f"Failed to parse JSON response for query '{query}': {e}"
-                    )
+                    logger.error(f"Failed to parse JSON response for query '{query}': {e}")
                     if attempt == max_retries - 1:
                         # Add empty result on final attempt
                         search_docs.append({"results": []})
@@ -368,25 +349,17 @@ def selenium_api_search(search_queries, include_raw_content: bool):
                 break  # Success, exit retry loop
 
             except Timeout as e:
-                logger.warning(
-                    f"Timeout for query '{query}' on attempt {attempt + 1}: {e}"
-                )
+                logger.warning(f"Timeout for query '{query}' on attempt {attempt + 1}: {e}")
                 if attempt == max_retries - 1:
-                    logger.error(
-                        f"Max retries exceeded for query '{query}' due to timeout"
-                    )
+                    logger.error(f"Max retries exceeded for query '{query}' due to timeout")
                     search_docs.append({"results": []})
                     continue
                 time.sleep(retry_delay * (2**attempt))  # Exponential backoff
 
             except ConnectionError as e:
-                logger.warning(
-                    f"Connection error for query '{query}' on attempt {attempt + 1}: {e}"
-                )
+                logger.warning(f"Connection error for query '{query}' on attempt {attempt + 1}: {e}")
                 if attempt == max_retries - 1:
-                    logger.error(
-                        f"Max retries exceeded for query '{query}' due to connection error"
-                    )
+                    logger.error(f"Max retries exceeded for query '{query}' due to connection error")
                     search_docs.append({"results": []})
                     continue
                 time.sleep(retry_delay * (2**attempt))
@@ -419,14 +392,10 @@ def selenium_api_search(search_queries, include_raw_content: bool):
                             f.write(result["raw_content"])
                         large_files.append(file_path)
                         result["raw_content"] = ""
-                except (IOError, OSError) as e:
-                    logger.error(
-                        f"Failed to write file for result '{result['title']}': {e}"
-                    )
+                except OSError as e:
+                    logger.error(f"Failed to write file for result '{result['title']}': {e}")
                 except Exception as e:
-                    logger.error(
-                        f"Unexpected error processing result '{result['title']}': {e}"
-                    )
+                    logger.error(f"Unexpected error processing result '{result['title']}': {e}")
 
             if len(large_files) > 0:
                 content_extractor.update(large_files)
@@ -446,9 +415,7 @@ def selenium_api_search(search_queries, include_raw_content: bool):
     return search_docs
 
 
-def web_search_deduplicate_and_format_sources(
-    search_response, include_raw_content=True
-):
+def web_search_deduplicate_and_format_sources(search_response, include_raw_content=True):
     # Collect all results
     sources_list = []
     for response in search_response:
@@ -463,19 +430,15 @@ def web_search_deduplicate_and_format_sources(
 
     # Format output
     formatted_text = "Sources:\n\n"
-    for i, source in enumerate(unique_sources.values(), 1):
+    for _i, source in enumerate(unique_sources.values(), 1):
         formatted_text += f"Source {source['title']}:\n===\n"
         formatted_text += f"URL: {source['url']}\n===\n"
-        formatted_text += (
-            f"Most relevant content from source: {source['content']}\n===\n"
-        )
+        formatted_text += f"Most relevant content from source: {source['content']}\n===\n"
         if include_raw_content:
             raw_content = source.get("raw_content", "")
             if raw_content is None:
                 raw_content = ""
-                logger.critical(
-                    f"Warning: No raw_content found for source {source['url']}"
-                )
+                logger.critical(f"Warning: No raw_content found for source {source['url']}")
             formatted_text += f"{raw_content}\n\n"
     return formatted_text.strip()
 

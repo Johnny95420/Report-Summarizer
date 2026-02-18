@@ -1,17 +1,17 @@
 # %%
-import os
 import glob
 import json
+import logging
+import os
 
 import omegaconf
 import torch
-from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
-from langchain_core.documents import Document
+from langchain_community.retrievers import BM25Retriever
 from langchain_community.vectorstores import Chroma
+from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-import logging
 
 logger = logging.getLogger("Retriever")
 logger.setLevel(logging.ERROR)
@@ -37,10 +37,8 @@ def process_date(information):
             if "_" in date:
                 date = date.split("_")[0]
 
-        except Exception as e:
-            logger.critical(
-                "Can not get date information by file name. Set date to None"
-            )
+        except Exception:
+            logger.critical("Can not get date information by file name. Set date to None")
             date = "None"
     return date
 
@@ -48,24 +46,14 @@ def process_date(information):
 def process_document(name, date, information):
     if "table" in information:
         if len(information["table"]) >= 100000:
-            logger.critical(
-                f"File:{file}.\n\n The length of table string longer than 100000"
-            )
+            logger.critical(f"File:{file}.\n\n The length of table string longer than 100000")
             return None
 
         metadata = {
             "path": name,
             "date": date,
-            "context_heading": (
-                information["context_heading"]
-                if information["context_heading"]
-                else "None"
-            ),
-            "context_paragraph": (
-                information["context_paragraph"]
-                if information["context_paragraph"]
-                else "None"
-            ),
+            "context_heading": (information["context_heading"] if information["context_heading"] else "None"),
+            "context_paragraph": (information["context_paragraph"] if information["context_paragraph"] else "None"),
             "summary": information["summary"],
             "table": information["table"],
         }

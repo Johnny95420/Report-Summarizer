@@ -1,12 +1,11 @@
 from dotenv import load_dotenv
+
 load_dotenv(".env")
 import asyncio
 import logging
-
+import pathlib
 import sqlite3
 from typing import Literal
-
-import pathlib
 
 import omegaconf
 
@@ -32,28 +31,30 @@ BACKUP_CONCLUDE_MODEL_NAME = config["BACKUP_CONCLUDE_MODEL_NAME"]
 DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
 if PROMPT_STYLE == "research":
     from Prompt.technical_research_prompt import (
-        report_planner_query_writer_instructions,
-        report_planner_instructions,
-        query_writer_instructions,
-        section_writer_instructions,
-        section_grader_instructions,
-        final_section_writer_instructions,
-        refine_section_instructions,
         content_refinement_instructions,
+        final_section_writer_instructions,
+        query_writer_instructions,
+        refine_section_instructions,
+        report_planner_instructions,
+        report_planner_query_writer_instructions,
+        section_grader_instructions,
+        section_writer_instructions,
     )
 elif PROMPT_STYLE == "industry":
     from Prompt.industry_prompt import (
-        report_planner_query_writer_instructions,
-        report_planner_instructions,
-        query_writer_instructions,
-        section_writer_instructions,
-        section_grader_instructions,
-        final_section_writer_instructions,
-        refine_section_instructions,
         content_refinement_instructions,
+        final_section_writer_instructions,
+        query_writer_instructions,
+        refine_section_instructions,
+        report_planner_instructions,
+        report_planner_query_writer_instructions,
+        section_grader_instructions,
+        section_writer_instructions,
     )
 else:
     raise ValueError("Only support industry and technical_research prompt template")
+
+from copy import deepcopy
 
 from langchain_community.callbacks.infino_callback import get_num_tokens
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -61,8 +62,6 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
-
-from copy import deepcopy
 
 from agentic_search import agentic_search_graph
 from retriever import hybrid_retriever
@@ -92,8 +91,6 @@ from Utils.utils import (
     web_search_deduplicate_and_format_sources,
 )
 
-
-
 logger = logging.getLogger("AgentLogger")
 logger.setLevel(logging.INFO)
 
@@ -105,7 +102,7 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
 logger.info(
-    f'VERIFY_MODEL_NAME : {config["VERIFY_MODEL_NAME"]}, MODEL_NAME : {config["MODEL_NAME"]}, CONCLUDE_MODEL_NAME : {config["CONCLUDE_MODEL_NAME"]}'
+    f"VERIFY_MODEL_NAME : {config['VERIFY_MODEL_NAME']}, MODEL_NAME : {config['MODEL_NAME']}, CONCLUDE_MODEL_NAME : {config['CONCLUDE_MODEL_NAME']}"
 )
 
 # =============================================================================
@@ -128,9 +125,7 @@ def search_relevance_doc(queries):
             if "table" in res.metadata:
                 info.append(res)
             else:
-                expanded_content = track_expanded_context(
-                    res.metadata["content"], res.page_content, 1500, 1000
-                )
+                expanded_content = track_expanded_context(res.metadata["content"], res.page_content, 1500, 1000)
                 return_res = deepcopy(res)
                 return_res.metadata["content"] = expanded_content
                 info.append(return_res)
@@ -140,14 +135,14 @@ def search_relevance_doc(queries):
 
 def _format_queries_history(queries_history: list) -> str:
     """Format queries history for display."""
-    return "\n".join(f"{idx+1}. {q}" for idx, q in enumerate(queries_history))
+    return "\n".join(f"{idx + 1}. {q}" for idx, q in enumerate(queries_history))
 
 
 def _format_follow_up_questions(follow_up_queries: list | None) -> str:
     """Format follow-up questions for display."""
     if follow_up_queries is None:
         return ""
-    return "\n".join(f"{idx+1}. {q}" for idx, q in enumerate(follow_up_queries))
+    return "\n".join(f"{idx + 1}. {q}" for idx, q in enumerate(follow_up_queries))
 
 
 def _call_llm_with_retry(
@@ -220,9 +215,7 @@ def generate_report_plan(state: ReportState, config: RunnableConfig):
     return {"sections": sections, "curr_refine_iteration": 0}
 
 
-def _generate_planner_queries(
-    topic: str, feedback: str | None, configurable: dict
-) -> list[str]:
+def _generate_planner_queries(topic: str, feedback: str | None, configurable: dict) -> list[str]:
     """Generate search queries for report planning."""
     report_structure = configurable["report_structure"]
     number_of_queries = configurable["number_of_queries"]
@@ -244,11 +237,7 @@ def _generate_planner_queries(
         MODEL_NAME,
         BACKUP_MODEL_NAME,
         [SystemMessage(content=system_instructions)]
-        + [
-            HumanMessage(
-                content="Generate search queries that will help with planning the sections of the report."
-            )
-        ],
+        + [HumanMessage(content="Generate search queries that will help with planning the sections of the report.")],
         tool=[queries_formatter],
         tool_choice="required",
     )
@@ -280,9 +269,7 @@ def _perform_planner_search(queries: list[str], configurable: dict) -> str:
     return source_str
 
 
-def _generate_report_sections(
-    topic: str, source_str: str, feedback: str | None, configurable: dict
-) -> list[Section]:
+def _generate_report_sections(topic: str, source_str: str, feedback: str | None, configurable: dict) -> list[Section]:
     """Generate report sections based on search results."""
     report_structure = configurable["report_structure"]
 
@@ -312,9 +299,7 @@ def _generate_report_sections(
         tool_choice="required",
     )
 
-    sections = [
-        Section(**tool_call["args"]) for tool_call in report_sections.tool_calls
-    ]
+    sections = [Section(**tool_call["args"]) for tool_call in report_sections.tool_calls]
     logger.info("===End report plan generation.===")
     return sections
 
@@ -400,9 +385,7 @@ async def search_db(state: SectionState, config: RunnableConfig):
     if not use_web and not use_local_db:
         raise ValueError("Should use at least one searching tool")
 
-    logger.info(
-        f"== Start searching topic:{state['section'].name} queries : {query_list}=="
-    )
+    logger.info(f"== Start searching topic:{state['section'].name} queries : {query_list}==")
 
     source_str = ""
     if use_local_db:
@@ -422,9 +405,7 @@ async def search_db(state: SectionState, config: RunnableConfig):
     }
 
 
-def write_section(
-    state: SectionState, config: RunnableConfig
-) -> Command[Literal[END, "search_db"]]:
+def write_section(state: SectionState, config: RunnableConfig) -> Command[Literal[END, "search_db"]]:
     """Write section content and determine if follow-up search is needed."""
     section = state["section"]
     configurable = config["configurable"]
@@ -461,9 +442,7 @@ def _prepare_source_for_writing(state: SectionState) -> str:
     retry_limit = 5 if section.content else 10
     num_retries = 0
 
-    logger.info(
-        f"Start write section : {section.name}, num_input_tokens:{num_tokens}, retry:{num_retries}"
-    )
+    logger.info(f"Start write section : {section.name}, num_input_tokens:{num_tokens}, retry:{num_retries}")
 
     while num_tokens >= 120000 and num_retries < retry_limit:
         source_str = source_str[:-1500]
@@ -476,13 +455,11 @@ def _prepare_source_for_writing(state: SectionState) -> str:
         )
         num_tokens = get_num_tokens(system_instructions, "gpt-4o-mini")
         num_retries += 1
-        logger.info(
-            f"Truncated source: {section.name}, num_input_tokens:{num_tokens}, retry:{num_retries}"
-        )
+        logger.info(f"Truncated source: {section.name}, num_input_tokens:{num_tokens}, retry:{num_retries}")
 
     if num_retries >= retry_limit:
         logger.critical(
-            f"There are too many tokens in the source string. Please consider reducing the amount of data searched each time."
+            "There are too many tokens in the source string. Please consider reducing the amount of data searched each time."
         )
         # Return truncated source instead of raising error to maintain compatibility
         return source_str
@@ -490,9 +467,7 @@ def _prepare_source_for_writing(state: SectionState) -> str:
     return source_str
 
 
-def _generate_section_content(
-    section: Section, source_str: str, state: SectionState
-) -> str:
+def _generate_section_content(section: Section, source_str: str, state: SectionState) -> str:
     """Generate section content using LLM."""
     system_instructions = section_writer_instructions.format(
         section_title=section.name,
@@ -510,22 +485,14 @@ def _generate_section_content(
         WRITER_MODEL_NAME,
         BACKUP_WRITER_MODEL_NAME,
         [SystemMessage(content=system_instructions)]
-        + [
-            HumanMessage(
-                content="Generate a report section based on the provided sources."
-            )
-        ],
+        + [HumanMessage(content="Generate a report section based on the provided sources.")],
     )
 
-    logger.info(
-        f"End generate section content of topic:{section.name}, Search iteration:{state['search_iterations']}"
-    )
+    logger.info(f"End generate section content of topic:{section.name}, Search iteration:{state['search_iterations']}")
     return section_content.content
 
 
-def _grade_section_content(
-    section: Section, state: SectionState
-) -> Command[Literal[END, "search_db"]]:
+def _grade_section_content(section: Section, state: SectionState) -> Command[Literal[END, "search_db"]]:
     """Grade section content and return command for next action."""
     queries_history = _format_queries_history(state["queries_history"])
 
@@ -535,9 +502,7 @@ def _grade_section_content(
         queries_history=queries_history,
     )
 
-    logger.info(
-        f"Start grade section content of topic:{section.name}, Search iteration:{state['search_iterations']}"
-    )
+    logger.info(f"Start grade section content of topic:{section.name}, Search iteration:{state['search_iterations']}")
 
     feedback = _call_llm_with_retry(
         VERIFY_MODEL_NAME,
@@ -558,9 +523,7 @@ def _grade_section_content(
         logger.info(f"Section:{section.name} pass model check or reach search depth.")
         return Command(update={"completed_sections": [section]}, goto=END)
     else:
-        logger.info(
-            f'Section:{section.name} fail model check.follow_up_queries:{feedback_data["follow_up_queries"]}'
-        )
+        logger.info(f"Section:{section.name} fail model check.follow_up_queries:{feedback_data['follow_up_queries']}")
         return Command(
             update={
                 "search_queries": feedback_data["follow_up_queries"],
@@ -629,9 +592,7 @@ async def gather_complete_section(state: ReportState, config: RunnableConfig):
     completed_sections = state["completed_sections"]
     full_context = format_sections(completed_sections)
 
-    refined_sections = await asyncio.gather(
-        *[_refine_content_for_section(s, full_context) for s in completed_sections]
-    )
+    refined_sections = await asyncio.gather(*[_refine_content_for_section(s, full_context) for s in completed_sections])
 
     completed_report_sections = format_sections(refined_sections)
     return {
@@ -743,11 +704,7 @@ def write_final_sections(state: SectionState, config: RunnableConfig):
         CONCLUDE_MODEL_NAME,
         BACKUP_CONCLUDE_MODEL_NAME,
         [SystemMessage(content=system_instructions)]
-        + [
-            HumanMessage(
-                content="Generate a report section based on the provided sources."
-            )
-        ],
+        + [HumanMessage(content="Generate a report section based on the provided sources.")],
     )
     logger.info(f"End write section:{section.name}")
 
@@ -757,7 +714,7 @@ def write_final_sections(state: SectionState, config: RunnableConfig):
 
 def compile_final_report(state: ReportState):
     """Compile final report from all sections."""
-    logger.info(f"Aggregate final report")
+    logger.info("Aggregate final report")
     sections = state["sections"]
     completed_sections = {s.name: s.content for s in state["completed_sections"]}
 
@@ -803,9 +760,7 @@ class ReportGraphBuilder:
 
     def _build_main_graph(self, section_graph: StateGraph) -> StateGraph:
         """Build the main report graph (shared by sync/async)."""
-        builder = StateGraph(
-            ReportState, input_schema=ReportStateInput, output_schema=ReportStateOutput
-        )
+        builder = StateGraph(ReportState, input_schema=ReportStateInput, output_schema=ReportStateOutput)
         builder.add_node("generate_report_plan", generate_report_plan)
         builder.add_node("human_feedback", human_feedback)
         builder.add_node("build_section_with_web_research", section_graph.compile())
@@ -851,9 +806,7 @@ class ReportGraphBuilder:
             main_graph = self._build_main_graph(section_graph)
 
             if self.async_checkpointer is not None:
-                self._async_graph = main_graph.compile(
-                    checkpointer=self.async_checkpointer
-                )
+                self._async_graph = main_graph.compile(checkpointer=self.async_checkpointer)
             else:
                 self._async_graph = main_graph.compile()
         return self._async_graph

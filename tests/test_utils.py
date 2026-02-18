@@ -1,7 +1,6 @@
 """Tests for Utils/utils.py"""
 
 import ast
-from pathlib import Path
 
 from .conftest import ROOT, find_function
 
@@ -19,6 +18,4 @@ class TestContentExtractorQuery:
         src = ast.unparse(func)
         assert "deepcopy" in src, "query() must use deepcopy"
         assert "return_res" in src, "query() must use return_res variable"
-        assert "info.append(return_res)" in src, (
-            "query() must append return_res (the expanded copy)"
-        )
+        assert "info.append(return_res)" in src, "query() must append return_res (the expanded copy)"

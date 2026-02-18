@@ -1,8 +1,6 @@
 """Tests for simple_report_writer.py"""
 
 import ast
-import re
-from pathlib import Path
 
 from .conftest import ROOT
 
@@ -33,10 +31,5 @@ class TestImports:
         if import_lines and non_import_lines:
             first_import = min(import_lines)
             last_import = max(import_lines)
-            interleaved = [
-                ln for ln in non_import_lines
-                if first_import < ln < last_import
-            ]
-            assert len(interleaved) == 0, (
-                f"Assignments on lines {interleaved} are interleaved between imports"
-            )
+            interleaved = [ln for ln in non_import_lines if first_import < ln < last_import]
+            assert len(interleaved) == 0, f"Assignments on lines {interleaved} are interleaved between imports"

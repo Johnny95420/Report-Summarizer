@@ -1,11 +1,10 @@
+from typing import Literal
+
 from langchain_core.tools import tool
-from typing import List, Literal
 
 
 @tool
-def searching_grader_formatter(
-    grade: Literal["pass", "fail"], follow_up_queries: List[str]
-):
+def searching_grader_formatter(grade: Literal["pass", "fail"], follow_up_queries: list[str]):
     """Summary
     Take grade and follow up queries convert them into suitable format
     Args:
@@ -46,7 +45,7 @@ def summary_formatter(summary_content: str):
 
 
 @tool
-def queries_formatter(thought: str, queries: List[str]):
+def queries_formatter(thought: str, queries: list[str]):
     """Summary
     Take thoughts and a list of queries convert them into Queries object
     Args:
@@ -57,7 +56,7 @@ def queries_formatter(thought: str, queries: List[str]):
 
 
 @tool
-def feedback_formatter(grade: Literal["pass", "fail"], follow_up_queries: List[str]):
+def feedback_formatter(grade: Literal["pass", "fail"], follow_up_queries: list[str]):
     """Summary
     Take grade and follow up queries convert them into Feedback object
     Args:
@@ -86,9 +85,7 @@ def section_formatter(name: str, description: str, research: bool, content: str)
 
 
 @tool
-def refine_section_formatter(
-    refined_description: str, refined_content: str, new_queries: List[str]
-):
+def refine_section_formatter(refined_description: str, refined_content: str, new_queries: list[str]):
     """Summary
     Take refined_description ,refined_content, new_queries and convert them into suitable format
     Args:

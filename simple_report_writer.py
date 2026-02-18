@@ -2,9 +2,7 @@ from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-import os
 import pathlib
-import pprint
 from typing import Literal
 
 import omegaconf
@@ -14,13 +12,19 @@ from langchain_litellm import ChatLiteLLM
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
-from Prompt.simple_prompt import (answer_instructions, doc_judger_instructions,
-                                  query_writer_instructions,
-                                  section_grader_instructions)
+from Prompt.simple_prompt import (
+    answer_instructions,
+    doc_judger_instructions,
+    query_writer_instructions,
+    section_grader_instructions,
+)
 from retriever import hybrid_retriever
 from State.simple_state import RAGState, RAGStateInput
-from Tools.simple_tools import (final_judge_formatter, queries_formatter,
-                                scores_formatter)
+from Tools.simple_tools import (
+    final_judge_formatter,
+    queries_formatter,
+    scores_formatter,
+)
 
 _HERE = pathlib.Path(__file__).parent
 config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
@@ -33,13 +37,9 @@ def generate_queries(state: RAGStateInput, config: RunnableConfig):
     configurable = config["configurable"]
     number_of_queries = configurable["number_of_queries"]
 
-    system_instructions = query_writer_instructions.format(
-        topic=topic, number_of_queries=number_of_queries
-    )
+    system_instructions = query_writer_instructions.format(topic=topic, number_of_queries=number_of_queries)
     writer_model = ChatLiteLLM(model=MODEL_NAME, temperature=0.0)
-    structure_model = writer_model.bind_tools(
-        [queries_formatter], tool_choice="required"
-    )
+    structure_model = writer_model.bind_tools([queries_formatter], tool_choice="required")
     results = structure_model.invoke(
         [SystemMessage(content=system_instructions)]
         + [HumanMessage(content="Generate relative queries on the provided topic.")]
@@ -79,11 +79,7 @@ def verify_relevance_doc(state: RAGState, config: RunnableConfig):
         )
         output = judger_model.invoke(
             [SystemMessage(content=doc_judger)]
-            + [
-                HumanMessage(
-                    content="Please help me to clarify the relavance of question and paragraph."
-                )
-            ]
+            + [HumanMessage(content="Please help me to clarify the relavance of question and paragraph.")]
         )
         score = output.tool_calls[0]["args"]["score"]
         if score >= 0.2:
@@ -102,9 +98,7 @@ def write_topic(state: RAGState, config: RunnableConfig):
         paragraphs += f"Context : {res.page_content}\n\n"
         paragraphs += "=" * 80 + "\n\n"
 
-    system_answer = answer_instructions.format(
-        topic=topic, context=paragraphs, completed_answer=completed_answer
-    )
+    system_answer = answer_instructions.format(topic=topic, context=paragraphs, completed_answer=completed_answer)
     writer_model = ChatLiteLLM(model=MODEL_NAME, temperature=0.8)
     outputs = writer_model.invoke(
         [SystemMessage(content=system_answer)]
@@ -113,9 +107,7 @@ def write_topic(state: RAGState, config: RunnableConfig):
     return {"information": [], "completed_answer": outputs.content}
 
 
-def check_completeness(
-    state: RAGState, config: RunnableConfig
-) -> Command[Literal[END, "search_relevance_doc"]]:
+def check_completeness(state: RAGState, config: RunnableConfig) -> Command[Literal[END, "search_relevance_doc"]]:
     topic = state["topic"]
     answer = state["completed_answer"]
     configurable = config["configurable"]
@@ -129,19 +121,13 @@ def check_completeness(
     )
     outputs = grader_model.invoke(
         [SystemMessage(content=section_grader)]
-        + [
-            HumanMessage(
-                content="Grade the report and consider follow-up questions for missing information"
-            )
-        ]
+        + [HumanMessage(content="Grade the report and consider follow-up questions for missing information")]
     )
     outputs = outputs.tool_calls[0]["args"]
     if outputs["grade"] == "pass":
         return Command(update={"final_answer": answer}, goto=END)
     else:
-        return Command(
-            update={"queries": outputs["queries"]}, goto="search_relevance_doc"
-        )
+        return Command(update={"queries": outputs["queries"]}, goto="search_relevance_doc")
 
 
 builder = StateGraph(RAGState, input=RAGStateInput)

@@ -1,9 +1,10 @@
+from typing import Literal
+
 from langchain_core.tools import tool
-from typing import List, Literal
 
 
 @tool
-def queries_formatter(queries: List[str]):
+def queries_formatter(queries: list[str]):
     """Summary
     Put queries into list
     Args:
@@ -23,7 +24,7 @@ def scores_formatter(score: float):
 
 
 @tool
-def final_judge_formatter(grade: Literal["pass", "fail"], queries: List[str]):
+def final_judge_formatter(grade: Literal["pass", "fail"], queries: list[str]):
     """
         get the grade of section report
     Args:

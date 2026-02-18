@@ -1,8 +1,7 @@
 # %%
 import operator
-from typing import Annotated, List, Literal, TypedDict
+from typing import Annotated, TypedDict
 
-from langchain_core.documents import Document
 from pydantic import BaseModel, Field
 
 
@@ -26,9 +25,7 @@ class Section(BaseModel):
     description: str = Field(
         description="Brief overview of the main topics and concepts to be covered in this section.",
     )
-    research: bool = Field(
-        description="Whether to perform web research for this section of the report."
-    )
+    research: bool = Field(description="Whether to perform web research for this section of the report.")
     content: str = Field(description="The content of the section.")
 
 
@@ -76,7 +73,7 @@ class SearchQuery(BaseModel):
 
 
 class Queries(BaseModel):
-    queries: List[SearchQuery] = Field(description="List of search queries.")
+    queries: list[SearchQuery] = Field(description="List of search queries.")
 
 
 class SectionState(TypedDict):

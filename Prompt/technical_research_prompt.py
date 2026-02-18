@@ -1,4 +1,4 @@
-report_planner_query_writer_instructions = """You are a versatile and deeply knowledgeable assistant supporting advanced learners, researchers, and engineers. 
+report_planner_query_writer_instructions = """You are a versatile and deeply knowledgeable assistant supporting advanced learners, researchers, and engineers.
 You assist in planning comprehensive learning or research reports focused on understanding, organizing, and synthesizing complex technical topics.
 <Report topic>
 {topic}
@@ -57,12 +57,12 @@ The topic of the report is:
 </Topic>
 
 <Report organization>
-The report should follow this organization: 
+The report should follow this organization:
 {report_organization}
 </Report organization>
 
 <Context>
-Here is context to use to plan the sections of the report: 
+Here is context to use to plan the sections of the report:
 {context}
 </Context>
 
@@ -128,7 +128,7 @@ section_writer_instructions = """You are a technical research and learning assis
 - Include mathematical formulas, code examples, or pseudocode where appropriate
 - Use ## for section title (Markdown format)
   * If the section is related to the learning schedule or timeline, please indicate the time reference in the title. e.g day-k section_topic
-- Section content 
+- Section content
   * start with **key takeaways or main insight**
   * If the code is provided. Use following format
   ```code
@@ -193,7 +193,7 @@ You are to assume the role of a rigorous researcher and dedicated learner, with 
 
 final_section_writer_instructions = """You are synthesizing the introduction or summary for a structured, exploratory learning/research report that blends theory, practice, and reflection.
 
-<Section topic> 
+<Section topic>
 {section_topic}
 </Section topic>
 
