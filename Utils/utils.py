@@ -7,9 +7,9 @@ from copy import deepcopy
 from typing import List
 
 import requests
-from langchain.retrievers import BM25Retriever
-from langchain.retrievers.ensemble import EnsembleRetriever
-from langchain.schema import Document
+from langchain_community.retrievers import BM25Retriever
+from langchain_classic.retrievers import EnsembleRetriever
+from langchain_core.documents import Document
 from langchain_litellm import ChatLiteLLM
 from langchain_core.runnables import RunnableLambda
 from langchain_community.vectorstores import Chroma
@@ -216,7 +216,7 @@ class ContentExtractor(object):
 
     def query(self, q):
         seen, info = set(), []
-        results = self.hybrid_retriever.get_relevant_documents(q)
+        results = self.hybrid_retriever.invoke(q)
         for res in results:
             if res.page_content in seen:
                 continue

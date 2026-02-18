@@ -2,7 +2,7 @@
 import operator
 from typing import Annotated, List, Literal, TypedDict
 
-from langchain.schema import Document
+from langchain_core.documents import Document
 from pydantic import BaseModel, Field
 
 

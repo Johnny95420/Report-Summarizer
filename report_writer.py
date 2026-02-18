@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+load_dotenv(".env")
 import asyncio
 import logging
 
@@ -7,6 +8,31 @@ from typing import Literal
 
 import omegaconf
 
+config = omegaconf.OmegaConf.load("report_config.yaml")
+PROMPT_STYLE = config["PROMPT_STYLE"]
+
+PLANNER_MODEL_NAME = config["PLANNER_MODEL_NAME"]
+BACKUP_PLANNER_MODEL_NAME = config["BACKUP_PLANNER_MODEL_NAME"]
+
+VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
+BACKUP_VERIFY_MODEL_NAME = config["BACKUP_VERIFY_MODEL_NAME"]
+
+MODEL_NAME = config["MODEL_NAME"]
+BACKUP_MODEL_NAME = config["BACKUP_MODEL_NAME"]
+
+WRITER_MODEL_NAME = config["WRITER_MODEL_NAME"]
+BACKUP_WRITER_MODEL_NAME = config["BACKUP_WRITER_MODEL_NAME"]
+
+CONCLUDE_MODEL_NAME = config["CONCLUDE_MODEL_NAME"]
+BACKUP_CONCLUDE_MODEL_NAME = config["BACKUP_CONCLUDE_MODEL_NAME"]
+
+DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
+if PROMPT_STYLE == "research":
+    from Prompt.technical_research_prompt import *
+elif PROMPT_STYLE == "industry":
+    from Prompt.industry_prompt import *
+else:
+    raise ValueError("Only support indutry and technical_research prompt template")
 
 from langchain_community.callbacks.infino_callback import get_num_tokens
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -46,32 +72,7 @@ from Utils.utils import (
     web_search_deduplicate_and_format_sources,
 )
 
-load_dotenv(".env")
-config = omegaconf.OmegaConf.load("report_config.yaml")
-PROMPT_STYLE = config["PROMPT_STYLE"]
 
-PLANNER_MODEL_NAME = config["PLANNER_MODEL_NAME"]
-BACKUP_PLANNER_MODEL_NAME = config["BACKUP_PLANNER_MODEL_NAME"]
-
-VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
-BACKUP_VERIFY_MODEL_NAME = config["BACKUP_VERIFY_MODEL_NAME"]
-
-MODEL_NAME = config["MODEL_NAME"]
-BACKUP_MODEL_NAME = config["BACKUP_MODEL_NAME"]
-
-WRITER_MODEL_NAME = config["WRITER_MODEL_NAME"]
-BACKUP_WRITER_MODEL_NAME = config["BACKUP_WRITER_MODEL_NAME"]
-
-CONCLUDE_MODEL_NAME = config["CONCLUDE_MODEL_NAME"]
-BACKUP_CONCLUDE_MODEL_NAME = config["BACKUP_CONCLUDE_MODEL_NAME"]
-
-DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
-if PROMPT_STYLE == "research":
-    from Prompt.technical_research_prompt import *
-elif PROMPT_STYLE == "industry":
-    from Prompt.industry_prompt import *
-else:
-    raise ValueError("Only support indutry and technical_research prompt template")
 
 logger = logging.getLogger("AgentLogger")
 logger.setLevel(logging.ERROR)
@@ -99,7 +100,7 @@ def search_relevance_doc(queries):
     for q in queries:
         if q == "":
             continue
-        results = hybrid_retriever.get_relevant_documents(q)
+        results = hybrid_retriever.invoke(q)
         for res in results:
             if res.page_content in seen:
                 continue

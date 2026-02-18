@@ -52,7 +52,7 @@ def search_relevance_doc(state: RAGState, config: RunnableConfig):
     for q in queries:
         if q == "":
             continue
-        results = hybrid_retriever.get_relevant_documents(q)
+        results = hybrid_retriever.invoke(q)
         for res in results:
             if res not in info:
                 info.append(res)
