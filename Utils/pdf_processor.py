@@ -1,14 +1,17 @@
 # %%
 import asyncio
 import json
+import logging
 import os
 import re
 from io import StringIO
 
+logger = logging.getLogger("pdf_processor")
+
 import pandas as pd
-from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
+from langchain_litellm import ChatLiteLLM
 from markdown_it import MarkdownIt
 from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
@@ -122,7 +125,8 @@ async def financial_report_metadata_extraction(model_name, file_name, content):
     )
     try:
         return output.tool_calls[0]["args"]
-    except Exception:
+    except Exception as e:
+        logger.warning("Metadata extraction failed for %s: %s, retrying...", file_name, e)
         output = await tool_model.ainvoke(
             [SystemMessage(content=system_instructions.format(content=content))]
             + [HumanMessage(content="Please help me to summarize this table into description for doing RAG.")]
@@ -211,21 +215,20 @@ class PDFProcessor:
         return metadata
 
     async def parse(self):
-        for f in self.files:
-            name_w_extension = os.path.basename(f)
+        for file_path in self.files:
+            name_w_extension = os.path.basename(file_path)
             name, _ = os.path.splitext(name_w_extension)
-            text = self.convert_pdf_to_text(f)
+            text = self.convert_pdf_to_text(file_path)
             metadata = await self.metadata_extraction(name, text[:5000])
             metadata["full_content"] = text
             with open(
                 f"{self.target_folder}/{name}.json",
                 "w",
                 encoding="utf-8",
-            ) as f:
-                json.dump(metadata, f)
+            ) as out_f:
+                json.dump(metadata, out_f, ensure_ascii=False)
 
-            if self.do_extract_table:
-                tables = self.extract_table(text)
+            tables = self.extract_table(text) if self.do_extract_table else []
             if len(tables) == 0:
                 continue
 
@@ -240,8 +243,8 @@ class PDFProcessor:
                     f"{self.target_folder}/{name}_table_{idx}.json",
                     "w",
                     encoding="utf-8",
-                ) as f:
-                    json.dump(table, f)
+                ) as out_f:
+                    json.dump(table, out_f, ensure_ascii=False)
 
     def run_parse(self):
         asyncio.run(self.parse())

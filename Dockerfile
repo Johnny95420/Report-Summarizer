@@ -48,4 +48,9 @@ RUN pip install --no-cache-dir \
 
 WORKDIR /root/pdf_parser
 
+# Install Python dependencies via Poetry (main group only; ML packages handled above via pip)
+# COPY is needed here because the project dir is volume-mounted at runtime, not at build time
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --only main --no-root
+
 CMD ["bash"]
