@@ -69,13 +69,115 @@ class TestJsonDumpEnsureAscii:
             )
 
 
-class TestPreprocessFilePaths:
-    """preprocess_files.py must use /root/pdf_parser paths, not /pdf_parser."""
+class TestParseBugFixes:
+    """Regression tests for critical bugs fixed in PDFProcessor.parse()."""
 
-    def test_paths_use_root_prefix(self):
+    def _get_parse_method(self, tree: ast.Module) -> ast.AsyncFunctionDef:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "parse":
+                return node
+        raise AssertionError("parse() method not found in pdf_processor.py")
+
+    def test_loop_variable_not_shadowed_by_file_handle(self):
+        """parse() must not use the same name for the loop var and the open() handle."""
+        source = (ROOT / "Utils" / "pdf_processor.py").read_text()
+        tree = ast.parse(source)
+        parse_fn = self._get_parse_method(tree)
+
+        for_loops = [n for n in ast.walk(parse_fn) if isinstance(n, ast.For)]
+        assert for_loops, "parse() must contain a for loop"
+        loop_var = for_loops[0].target.id  # e.g. "file_path"
+
+        with_items = [n for n in ast.walk(parse_fn) if isinstance(n, ast.withitem)]
+        handle_names = [
+            item.optional_vars.id
+            for item in with_items
+            if isinstance(item.optional_vars, ast.Name)
+        ]
+        assert loop_var not in handle_names, (
+            f"Loop variable '{loop_var}' must not be reused as a file handle — "
+            "this shadows the path on the second iteration"
+        )
+
+    def test_tables_always_assigned_before_use(self):
+        """tables must be assigned unconditionally so do_extract_table=False never raises NameError."""
+        source = (ROOT / "Utils" / "pdf_processor.py").read_text()
+        tree = ast.parse(source)
+        parse_fn = self._get_parse_method(tree)
+
+        # tables = ... must appear as a direct (non-nested-in-if) assign in the for-loop body
+        for_loop = next(n for n in ast.walk(parse_fn) if isinstance(n, ast.For))
+        direct_assigns = [
+            n
+            for n in for_loop.body
+            if isinstance(n, ast.Assign)
+            and any(
+                isinstance(t, ast.Name) and t.id == "tables" for t in n.targets
+            )
+        ]
+        assert direct_assigns, (
+            "'tables' must be assigned unconditionally in parse() loop body "
+            "(use ternary or initialize before if-block) to avoid NameError when do_extract_table=False"
+        )
+
+    def test_bare_except_logs_warning(self):
+        """The retry except in financial_report_metadata_extraction must log a warning."""
+        source = (ROOT / "Utils" / "pdf_processor.py").read_text()
+        tree = ast.parse(source)
+
+        extraction_fn = next(
+            (
+                n
+                for n in ast.walk(tree)
+                if isinstance(n, ast.AsyncFunctionDef)
+                and n.name == "financial_report_metadata_extraction"
+            ),
+            None,
+        )
+        assert extraction_fn is not None, "financial_report_metadata_extraction not found"
+
+        try_nodes = [n for n in ast.walk(extraction_fn) if isinstance(n, ast.Try)]
+        assert try_nodes, "No try/except found in financial_report_metadata_extraction"
+
+        for try_node in try_nodes:
+            for handler in try_node.handlers:
+                # handler must capture the exception (as e) and call logger.warning
+                assert handler.name is not None, (
+                    "except clause must capture exception with 'as e' to enable logging"
+                )
+                warning_calls = [
+                    n
+                    for n in ast.walk(handler)
+                    if isinstance(n, ast.Call)
+                    and isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "warning"
+                ]
+                assert warning_calls, (
+                    "except handler must call logger.warning() — "
+                    "bare except swallows errors silently"
+                )
+
+
+class TestPreprocessFilesCLI:
+    """preprocess_files.py must be a typer CLI with no hardcoded paths."""
+
+    def test_no_hardcoded_paths(self):
         source = (ROOT / "preprocess_files.py").read_text()
+        assert "/pdf_parser/raw_pdf" not in source, "raw_pdf path must not be hardcoded"
+        assert "/pdf_parser/raw_md" not in source, "raw_md path must not be hardcoded"
 
-        assert "/root/pdf_parser/raw_pdf" in source, "raw_pdf path must be /root/pdf_parser/raw_pdf"
-        assert "/root/pdf_parser/raw_md" in source, "raw_md path must be /root/pdf_parser/raw_md"
-        assert '"/pdf_parser/raw_pdf' not in source, "raw_pdf path must not use bare /pdf_parser/ prefix"
-        assert '"/pdf_parser/raw_md' not in source, "raw_md path must not use bare /pdf_parser/ prefix"
+    def test_uses_typer(self):
+        source = (ROOT / "preprocess_files.py").read_text()
+        assert "typer" in source, "preprocess_files.py must use typer for CLI"
+
+    def test_input_output_are_arguments(self):
+        source = (ROOT / "preprocess_files.py").read_text()
+        tree = ast.parse(source)
+        func = next(
+            (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "main"),
+            None,
+        )
+        assert func is not None, "main() function not found in preprocess_files.py"
+        arg_names = [a.arg for a in func.args.args]
+        assert "input_dir" in arg_names, "main() must have input_dir argument"
+        assert "output_dir" in arg_names, "main() must have output_dir argument"

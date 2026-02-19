@@ -26,7 +26,7 @@ A modular and automated research report generation tool designed for **in-depth 
 | ----------------------- | ------------------------------------------------------------------------------- |
 | `report_writer.py`      | **(Main)** Orchestrates multi-agent collaboration for planning and writing in-depth research reports using LangGraph. |
 | `agentic_search.py`     | **(Core Module)** Implements the agentic search logic, enabling autonomous and iterative research. |
-| `preprocess_files.py`   | A script to run various preprocessing functions from `Utils`, such as handling PDF and audio files. |
+| `preprocess_files.py`   | Typer CLI for batch PDF preprocessing. Run as: `python preprocess_files.py INPUT_DIR OUTPUT_DIR [--model] [--no-table]` |
 | `retriever.py`          | Implements the hybrid retriever, combining local vector search with keyword search. |
 | `Prompt/`               | Contains prompt templates for the industry/stock analysis report style. |
 | `State/`                | Defines the state objects used in LangGraph, like `ReportState` and `SectionState`. |
@@ -144,10 +144,10 @@ pip install --no-deps funasr marker-pdf
 If you have local PDF or audio files to include in the retrieval, place them in a source directory (e.g., `data/raw_files/`). Then, run the preprocessing script:
 
 ```bash
-python preprocess_files.py
+python preprocess_files.py DATA_DIR OUTPUT_DIR [--model deepseek/deepseek-chat] [--no-table]
 ```
 
-This script will process the files and save the structured output. Ensure the output directory is correctly specified under `raw_file_path` in your `retriever_config.yaml` so the RAG pipeline can find the data.
+This script processes PDF files and saves structured JSON output. Ensure the output directory is correctly specified under `raw_file_path` in your `retriever_config.yaml` so the RAG pipeline can find the data.
 
 ### 2. Run Report Generation
 
