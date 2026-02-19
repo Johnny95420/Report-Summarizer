@@ -6,7 +6,7 @@ import re
 from io import StringIO
 
 import pandas as pd
-from langchain_community.chat_models import ChatLiteLLM
+from langchain_litellm import ChatLiteLLM
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from markdown_it import MarkdownIt
@@ -222,7 +222,7 @@ class PDFProcessor:
                 "w",
                 encoding="utf-8",
             ) as f:
-                json.dump(metadata, f)
+                json.dump(metadata, f, ensure_ascii=False)
 
             if self.do_extract_table:
                 tables = self.extract_table(text)
@@ -241,7 +241,7 @@ class PDFProcessor:
                     "w",
                     encoding="utf-8",
                 ) as f:
-                    json.dump(table, f)
+                    json.dump(table, f, ensure_ascii=False)
 
     def run_parse(self):
         asyncio.run(self.parse())
