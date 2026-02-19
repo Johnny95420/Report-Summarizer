@@ -2,7 +2,7 @@
 
 import ast
 
-from .conftest import ROOT, find_function
+from .conftest import ROOT
 
 
 class TestChatLiteLLMImport:
@@ -26,6 +26,12 @@ class TestChatLiteLLMImport:
         ]
         names = [alias.name for imp in imports for alias in imp.names]
         assert "ChatLiteLLM" in names, "ChatLiteLLM must be imported from langchain_litellm"
+
+    def test_langchain_litellm_in_pyproject(self):
+        pyproject = (ROOT / "pyproject.toml").read_text()
+        assert "langchain-litellm" in pyproject, (
+            "langchain-litellm must be declared in pyproject.toml dependencies"
+        )
 
 
 class TestJsonDumpEnsureAscii:
@@ -69,11 +75,7 @@ class TestPreprocessFilePaths:
     def test_paths_use_root_prefix(self):
         source = (ROOT / "preprocess_files.py").read_text()
 
-        assert "/pdf_parser/raw_pdf" not in source or "/root/pdf_parser/raw_pdf" in source, (
-            "raw_pdf path must use /root/pdf_parser/raw_pdf, not /pdf_parser/raw_pdf"
-        )
-        assert "/pdf_parser/raw_md" not in source or "/root/pdf_parser/raw_md" in source, (
-            "raw_md path must use /root/pdf_parser/raw_md, not /pdf_parser/raw_md"
-        )
         assert "/root/pdf_parser/raw_pdf" in source, "raw_pdf path must be /root/pdf_parser/raw_pdf"
         assert "/root/pdf_parser/raw_md" in source, "raw_md path must be /root/pdf_parser/raw_md"
+        assert '"/pdf_parser/raw_pdf' not in source, "raw_pdf path must not use bare /pdf_parser/ prefix"
+        assert '"/pdf_parser/raw_md' not in source, "raw_md path must not use bare /pdf_parser/ prefix"

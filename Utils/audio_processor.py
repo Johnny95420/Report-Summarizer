@@ -4,7 +4,7 @@ import os
 
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
-from langchain_community.chat_models import ChatLiteLLM
+from langchain_litellm import ChatLiteLLM
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 
