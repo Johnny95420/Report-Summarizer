@@ -25,6 +25,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from Prompt.agentic_search_prompt import *
+from State.agentic_search_state import AgenticSearchState
 from Tools.tools import (
     quality_formatter,
     queries_formatter,
@@ -88,7 +89,6 @@ def queries_rewriter(queries: list[str]) -> list[str]:
     return queries
 
 
-from State.agentic_search_state import AgenticSearchState
 
 
 async def check_search_quality_async(query: str, document: str) -> int:

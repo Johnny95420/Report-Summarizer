@@ -123,7 +123,7 @@ Rules:
 - Prefer semantic_search for conceptual queries; keyword_search for exact names, codes, and numbers.
 - Run semantic_search + keyword_search in parallel to maximise coverage per iteration.
 - Use peek_page to screen results cheaply before committing to go_to_page.
-- Scores below 0.4 in semantic_search are weak signals; verify with keyword_search.
+- Scores below ~0.4 in semantic_search are typically weak signals (note: scores may exceed 0–1 range depending on the embedding model); verify with keyword_search.
 - Search vocabulary: try multiple phrasings for the same concept (e.g. "EPS earnings per share", "CoWoS advanced packaging", "CCL copper clad laminate"). Do not give up after one failed search.
 - Numeric precision: report exact figures with units as found in the document (e.g. "NT$300", "67%", "1,448 億美元"). Never paraphrase or round numbers.
 </General_Rules>

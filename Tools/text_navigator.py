@@ -2,10 +2,13 @@ import json
 import logging
 import os
 import pathlib
+import threading
+from typing import NamedTuple
 
 import omegaconf
 from langchain_community.retrievers import BM25Retriever
 from langchain_community.vectorstores import Chroma
+from langchain_core.documents import Document
 from langchain_core.tools import BaseTool, tool
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -21,18 +24,32 @@ logger = logging.getLogger("TextNavigator")
 logger.setLevel(logging.ERROR)
 
 # ---------------------------------------------------------------------------
-# Module-level embedding singleton
+# Module-level embedding singleton (thread-safe)
 # ---------------------------------------------------------------------------
 _embedding_model: HuggingFaceEmbeddings | None = None
 _embedding_model_name: str = ""
+_embedding_lock = threading.Lock()
 
 
 def get_embedding_model(model_name: str = "Qwen/Qwen3-Embedding-0.6B") -> HuggingFaceEmbeddings:
     global _embedding_model, _embedding_model_name
-    if _embedding_model is None or _embedding_model_name != model_name:
-        _embedding_model = HuggingFaceEmbeddings(model_name=model_name)
-        _embedding_model_name = model_name
+    if _embedding_model is not None and _embedding_model_name == model_name:
+        return _embedding_model
+    with _embedding_lock:
+        # Double-checked locking
+        if _embedding_model is None or _embedding_model_name != model_name:
+            _embedding_model = HuggingFaceEmbeddings(model_name=model_name)
+            _embedding_model_name = model_name
     return _embedding_model
+
+
+# ---------------------------------------------------------------------------
+# Bookmark type
+# ---------------------------------------------------------------------------
+class Bookmark(NamedTuple):
+    path: str
+    doc_name: str
+    page_id: int
 
 
 # ---------------------------------------------------------------------------
@@ -62,8 +79,8 @@ class AgentDocumentReader:
         self._bm25: BM25Retriever | None = None
         self._current_page: int = 0
         self._current_path: str | None = None
-        # Bookmarks survive document switches: {label: (path, doc_name, page_id)}
-        self._bookmarks: dict[str, tuple[str, str, int]] = {}
+        # Bookmarks survive document switches: {label: Bookmark(path, doc_name, page_id)}
+        self._bookmarks: dict[str, Bookmark] = {}
 
     # ------------------------------------------------------------------
     # Document lifecycle
@@ -76,8 +93,6 @@ class AgentDocumentReader:
         Returns a status summary string. If *path* is already open, returns current
         state without reloading (dedup check).
         """
-        import json
-
         # Dedup: skip reload if same document is already open
         if self._current_path == path and self._document is not None:
             return (
@@ -88,35 +103,48 @@ class AgentDocumentReader:
         with open(path, encoding="utf-8") as f:
             raw = json.load(f)
 
+        # Construct model from the parsed dict directly (single read)
+        raw["pages"] = [Document(**d) for d in raw["pages"]]
         if "highlights" in raw and "tables" in raw:
-            doc = PDFReaderDocument.load(path)
+            raw["tables"] = [Document(**d) for d in raw["tables"]]
+            doc = PDFReaderDocument(**raw)
         else:
-            doc = BaseReaderDocument.load(path)
+            doc = BaseReaderDocument(**raw)
 
+        # Build vectorstore + BM25 before committing state so a failure
+        # doesn't leave the reader in a half-initialised state.
+        try:
+            os.makedirs(self._persist_dir, exist_ok=True)
+            persist_path = os.path.join(self._persist_dir, sanitize_name(doc.name))
+
+            embeddings = get_embedding_model(self._embedding_model_name)
+            if os.path.exists(persist_path):
+                vectorstore = Chroma(
+                    persist_directory=persist_path,
+                    embedding_function=embeddings,
+                )
+            else:
+                vectorstore = Chroma.from_documents(
+                    documents=doc.pages,
+                    embedding=embeddings,
+                    persist_directory=persist_path,
+                )
+
+            bm25 = BM25Retriever.from_documents(doc.pages)
+        except Exception as e:
+            self._document = None
+            self._vectorstore = None
+            self._bm25 = None
+            self._current_path = None
+            raise RuntimeError(f"Failed to open '{path}': {e}") from e
+
+        # Commit state only after successful init
         self._document = doc
         self._current_page = 0
         self._current_path = path
+        self._vectorstore = vectorstore
+        self._bm25 = bm25
         # NOTE: bookmarks are intentionally NOT cleared here — they persist across documents
-
-        # Build or load vectorstore
-        os.makedirs(self._persist_dir, exist_ok=True)
-        persist_path = os.path.join(self._persist_dir, sanitize_name(doc.name))
-
-        embeddings = get_embedding_model(self._embedding_model_name)
-        if os.path.exists(persist_path):
-            self._vectorstore = Chroma(
-                persist_directory=persist_path,
-                embedding_function=embeddings,
-            )
-        else:
-            self._vectorstore = Chroma.from_documents(
-                documents=doc.pages,
-                embedding=embeddings,
-                persist_directory=persist_path,
-            )
-
-        # Build BM25 index
-        self._bm25 = BM25Retriever.from_documents(doc.pages)
 
         return f"Opened: {doc.name} | date: {doc.date} | {len(doc.pages)} pages"
 
@@ -195,25 +223,26 @@ class AgentDocumentReader:
     def update_bookmark(self, label: str) -> str:
         """Save current page under *label*. Bookmarks persist across document switches."""
         self._require_open()
-        self._bookmarks[label] = (self._current_path, self._document.name, self._current_page)
+        self._bookmarks[label] = Bookmark(self._current_path, self._document.name, self._current_page)
         return f"Bookmarked page {self._current_page} of '{self._document.name}' as '{label}'"
 
     def show_bookmarks(self) -> dict:
         """Return all saved bookmarks as {label: {doc, page_id}}."""
         return {
-            label: {"doc": name, "page_id": page_id}
-            for label, (path, name, page_id) in self._bookmarks.items()
+            label: {"doc": bm.doc_name, "page_id": bm.page_id}
+            for label, bm in self._bookmarks.items()
         }
 
     def go_to_bookmark(self, label: str) -> str:
         """Move cursor to the page saved under *label*, auto-switching document if needed."""
         if label not in self._bookmarks:
             raise KeyError(f"Bookmark '{label}' not found. Available: {list(self._bookmarks)}")
-        path, _name, page_id = self._bookmarks[label]
-        if path != self._current_path:
-            self.open_document(path)
-        self._current_page = page_id
-        return self._document.pages[page_id].page_content
+        bm = self._bookmarks[label]
+        if bm.path != self._current_path:
+            self.open_document(bm.path)
+        self._validate_page(bm.page_id)
+        self._current_page = bm.page_id
+        return self._document.pages[bm.page_id].page_content
 
     # ------------------------------------------------------------------
     # Search
@@ -248,10 +277,19 @@ class AgentDocumentReader:
         if not (0 <= page < total):
             raise IndexError(f"Page {page} out of range [0, {total - 1}].")
 
-    # TODO: if search results is a table. the page_content is table summary the original table is in the metadata. If agent do not open this page can not read the original table  
+    # TODO: Table search results only contain the table summary as page_content.
+    # The original table markup is stored in doc.metadata["table"]. Currently the
+    # agent must call go_to_page to read the full table — a dedicated tool for
+    # retrieving raw table data by page_id would remove this extra step.
     def _make_result(self, doc, score: float | None) -> SearchResult:
-        page_id = doc.metadata.get("page_id", 0)
-        page_content = self._document.pages[page_id].page_content if page_id < len(self._document.pages) else ""
+        page_id = doc.metadata.get("page_id", None)
+        if page_id is None:
+            logger.warning("Search result missing 'page_id' metadata — defaulting to 0")
+            page_id = 0
+        if not (0 <= page_id < len(self._document.pages)):
+            logger.error("page_id %d out of range [0, %d) — returning empty preview", page_id, len(self._document.pages))
+            return SearchResult(page_id=page_id, score=score, page_preview="[error: page_id out of range]")
+        page_content = self._document.pages[page_id].page_content
         return SearchResult(
             page_id=page_id,
             score=score,
@@ -297,20 +335,10 @@ class AgentDocumentReader:
             """
             return _reader.open_document(path)
 
-        @tool
-        def close_document() -> str:
-            """Close the currently open document and release its vectorstore and BM25 index from memory.
-
-            Input:  none.
-            Output: confirmation string "Document closed.".
-
-            Agent Instruction:
-            - Call this after finishing with a document when processing many files in one task,
-              to prevent memory from accumulating across documents.
-            - After closing, open_document must be called again before any other tool.
-            """
-            _reader.close_document()
-            return "Document closed."
+        # close_document is intentionally excluded from agent tools — the agent
+        # should open_document to switch files (which resets state) rather than
+        # explicitly closing. The instance method close_document() remains
+        # available for internal / programmatic use.
 
         @tool
         def get_status() -> str:
@@ -432,7 +460,7 @@ class AgentDocumentReader:
                     k     — number of results to return (default set in config).
             Output: JSON array of results, each with:
                     - page_id:      page index (pass directly to go_to_page or peek_page)
-                    - score:        relevance score 0–1 (higher is more relevant)
+                    - score:        relevance score (higher is more relevant; may exceed 0-1 range)
                     - page_preview: first 250 characters of that page
 
             Agent Instruction:

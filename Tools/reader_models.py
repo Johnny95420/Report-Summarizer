@@ -47,10 +47,13 @@ class BaseReaderDocument(BaseModel):
     @classmethod
     def load(cls, path: str) -> "BaseReaderDocument":
         """Load from JSON, reconstructing Document objects from dicts."""
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        data["pages"] = [Document(**d) for d in data["pages"]]
-        return cls(**data)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            data["pages"] = [Document(**d) for d in data["pages"]]
+            return cls(**data)
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            raise ValueError(f"Failed to load '{path}': {e}. Try deleting the cached file and re-preprocessing.") from e
 
 
 class PDFReaderDocument(BaseReaderDocument):
@@ -66,8 +69,11 @@ class PDFReaderDocument(BaseReaderDocument):
 
     @classmethod
     def load(cls, path: str) -> "PDFReaderDocument":
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        data["pages"] = [Document(**d) for d in data["pages"]]
-        data["tables"] = [Document(**d) for d in data["tables"]]
-        return cls(**data)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            data["pages"] = [Document(**d) for d in data["pages"]]
+            data["tables"] = [Document(**d) for d in data["tables"]]
+            return cls(**data)
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            raise ValueError(f"Failed to load '{path}': {e}. Try deleting the cached file and re-preprocessing.") from e

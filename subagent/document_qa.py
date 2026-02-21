@@ -34,6 +34,7 @@ MODEL_NAME = config["MODEL_NAME"]
 BACKUP_MODEL_NAME = config["BACKUP_MODEL_NAME"]
 
 logger = logging.getLogger("DocumentQA")
+logger.setLevel(logging.ERROR)
 
 
 # ---------------------------------------------------------------------------
@@ -65,17 +66,17 @@ def submit_answer(answer: str) -> str:
 def _build_iteration_reminder(iteration: int, budget: int) -> str:
     """Build an ephemeral reminder injected before each LLM call."""
     remaining = budget - iteration
-    if iteration % 10 == 0:
-        return (
-            f"[Progress Check — Iteration {iteration}/{budget} | {remaining} calls remaining]\n"
-            f"Review your todo list now. Update each item: [] (pending) or [x] (done). "
-            f"No emoji. Add any newly discovered tasks and re-prioritise before continuing.\n"
-        )
-    elif remaining <= 5:
+    if remaining <= 5:
         return (
             f"[URGENT — Iteration {iteration}/{budget} | {remaining} calls remaining]\n"
             f"Budget almost exhausted. Call submit_answer(answer='...') in THIS response. "
             f"Do not make any more tool calls — synthesise from what you have gathered so far."
+        )
+    elif iteration % 10 == 0:
+        return (
+            f"[Progress Check — Iteration {iteration}/{budget} | {remaining} calls remaining]\n"
+            f"Review your todo list now. Update each item: [] (pending) or [x] (done). "
+            f"No emoji. Add any newly discovered tasks and re-prioritise before continuing.\n"
         )
     else:
         return f"[Iteration {iteration}/{budget} | {remaining} calls remaining]"
@@ -95,7 +96,11 @@ def agent_node(state: DocumentQAState, config: RunnableConfig):
     messages = list(state["messages"]) + [HumanMessage(content=reminder)]
 
     logger.info("[agent] Iteration %d/%d — calling LLM (%s)", iteration, budget, MODEL_NAME)
-    response = call_llm(MODEL_NAME, BACKUP_MODEL_NAME, messages, tool=tools)
+    try:
+        response = call_llm(MODEL_NAME, BACKUP_MODEL_NAME, messages, tool=tools)
+    except Exception as e:
+        logger.error("[agent] LLM call failed at iteration %d: %s", iteration, e)
+        response = AIMessage(content=f"[LLM error: {e}. Retrying next iteration — consider simplifying your tool calls.]")
 
     # Log response summary
     tool_calls = getattr(response, "tool_calls", [])
@@ -133,7 +138,10 @@ def extract_answer_node(state: DocumentQAState):
             )
         else:
             answer = str(content)
-        logger.warning("[extract_answer] No submit_answer found, using text fallback (%d chars)", len(answer))
+        if answer:
+            logger.warning("[extract_answer] No submit_answer found, using text fallback (%d chars)", len(answer))
+        else:
+            logger.error("[extract_answer] No submit_answer found and text fallback is empty")
     return {"answer": answer, "messages": tool_messages}
 
 
@@ -152,7 +160,11 @@ def force_answer_node(state: DocumentQAState):
         )
     )
 
-    response = call_llm(MODEL_NAME, BACKUP_MODEL_NAME, messages, tool=[submit_answer], tool_choice="required")
+    try:
+        response = call_llm(MODEL_NAME, BACKUP_MODEL_NAME, messages, tool=[submit_answer], tool_choice="required")
+    except Exception as e:
+        logger.error("[force_answer] LLM call failed: %s", e)
+        response = AIMessage(content=f"[LLM error during forced answer: {e}]")
     logger.info("[force_answer] LLM responded, tool_calls=%s", [tc["name"] for tc in getattr(response, "tool_calls", [])])
 
     return {"messages": [response]}
@@ -166,7 +178,8 @@ def route_response(state: DocumentQAState) -> str:
         return "agent"
 
     # 1. submit_answer called → extract answer, go to END
-    if any(tc["name"] == "submit_answer" for tc in last_msg.tool_calls):
+    tool_calls = getattr(last_msg, "tool_calls", None) or []
+    if any(tc["name"] == "submit_answer" for tc in tool_calls):
         logger.info("[route] submit_answer detected → extract_answer")
         return "extract_answer"
 
@@ -176,8 +189,8 @@ def route_response(state: DocumentQAState) -> str:
         return "force_answer"
 
     # 3. Has tool calls → execute them
-    if last_msg.tool_calls:
-        tool_names = [tc["name"] for tc in last_msg.tool_calls]
+    if tool_calls:
+        tool_names = [tc["name"] for tc in tool_calls]
         logger.info("[route] Tool calls %s → tools", tool_names)
         return "tools"
 
@@ -227,6 +240,19 @@ def build_document_qa_graph(tools: list):
 # ---------------------------------------------------------------------------
 # Convenience entry points
 # ---------------------------------------------------------------------------
+def _validate_inputs(file_paths: list[dict], question: str, budget: int) -> None:
+    """Validate inputs for run_document_qa / run_document_qa_async."""
+    if not file_paths:
+        raise ValueError("file_paths must be a non-empty list")
+    for i, fp in enumerate(file_paths):
+        if not isinstance(fp, dict) or "name" not in fp or "path" not in fp:
+            raise ValueError(f"file_paths[{i}] must be a dict with 'name' and 'path' keys, got: {fp}")
+    if not question or not question.strip():
+        raise ValueError("question must be a non-empty string")
+    if budget <= 0:
+        raise ValueError(f"budget must be > 0, got {budget}")
+
+
 def run_document_qa(
     file_paths: list[dict],
     question: str,
@@ -242,6 +268,7 @@ def run_document_qa(
     Returns:
         The answer string.
     """
+    _validate_inputs(file_paths, question, budget)
     navigator = AgentDocumentReader()
     all_tools = navigator.get_tools() + [submit_answer]
 
@@ -280,6 +307,7 @@ async def run_document_qa_async(
     Returns:
         The answer string.
     """
+    _validate_inputs(file_paths, question, budget)
     navigator = AgentDocumentReader()
     all_tools = navigator.get_tools() + [submit_answer]
 

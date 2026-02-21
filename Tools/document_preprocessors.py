@@ -92,6 +92,8 @@ class PDFDocumentPreprocessor(BaseDocumentPreprocessor):
         highlights = ""
 
         related_files = glob.glob(f"{folder}/{name}*")
+        if not related_files:
+            raise FileNotFoundError(f"No files found matching '{folder}/{name}*'")
         for file in related_files:
             with open(file, encoding="utf-8") as f:
                 information = json.load(f)
@@ -103,8 +105,12 @@ class PDFDocumentPreprocessor(BaseDocumentPreprocessor):
             else:
                 date = self._process_date(file, name, information)
                 highlights = information.get("report_highlights") or ""
+                try:
+                    full_content = information["full_content"]
+                except KeyError:
+                    raise KeyError(f"Missing 'full_content' key in file: {file}")
                 main_docs.append(Document(
-                    information["full_content"],
+                    full_content,
                     metadata={"path": file, "date": date},
                 ))
 
@@ -128,19 +134,19 @@ class PDFDocumentPreprocessor(BaseDocumentPreprocessor):
     def _process_date(self, file: str, name: str, information: dict) -> str | None:
         date = information.get("date")
         if date is None or date == "None":
-            logger.critical(f"Cannot get date from content in file: {file}. Trying filename.")
+            logger.warning("Cannot get date from content in file: %s. Trying filename.", file)
             try:
                 date = name.split("-")[-1]
                 if "_" in date:
                     date = date.split("_")[0]
             except Exception:
-                logger.critical(f"Cannot parse date from filename: {file}. Setting to None.")
+                logger.warning("Cannot parse date from filename: %s. Setting to None.", file)
                 date = None
         return date
 
     def _process_table(self, file: str, name: str, information: dict) -> Document | None:
         if len(information.get("table", "")) >= 100000:
-            logger.critical(f"File: {file}. Table string longer than 100000 chars.")
+            logger.warning("File: %s. Table string longer than 100000 chars.", file)
             return None
 
         date = self._process_date(file, name, information)
