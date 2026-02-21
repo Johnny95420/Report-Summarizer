@@ -4,11 +4,10 @@ import logging
 
 # Load configurations
 import pathlib
-from typing import TypedDict
 
 import omegaconf
 
-_HERE = pathlib.Path(__file__).parent
+_HERE = pathlib.Path(__file__).parent.parent
 config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
 
 LIGHT_MODEL_NAME = config["LIGHT_MODEL_NAME"]
@@ -89,16 +88,7 @@ def queries_rewriter(queries: list[str]) -> list[str]:
     return queries
 
 
-class AgenticSearchState(TypedDict):
-    queries: list[str]
-    followed_up_queries: list[str]
-    web_results: list[dict]
-    filtered_web_results: list[dict]
-    compressed_web_results: list[dict]
-    source_str: str
-    max_num_iterations: int
-    curr_num_iterations: int
-    url_memo: set[str]
+from State.agentic_search_state import AgenticSearchState
 
 
 async def check_search_quality_async(query: str, document: str) -> int:
