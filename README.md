@@ -12,7 +12,7 @@ A modular and automated research report generation tool designed for **in-depth 
 - 🧱 **Flexible Report Structure**: Configure the report structure and prompt style via YAML files.
 - 🤖 **Diverse Workflows**:
     - **Deep Report Generation (`report_writer.py`)**: A full-fledged report writing process where multiple agents (Planner, Researcher, Writer, Reviewer) collaborate.
-    - **Agentic Search (`agentic_search.py`)**: A standalone, agent-driven deep search module that dynamically generates follow-up questions for multi-step information exploration.
+    - **Agentic Search (`subagent/agentic_search.py`)**: A standalone, agent-driven deep search module that dynamically generates follow-up questions for multi-step information exploration.
 - 👤 **Human-in-the-Loop**: Supports user feedback to regenerate or revise the report plan.
 - 📑 **Parallel Processing**: Capable of generating multiple report sections simultaneously for efficient execution.
 - 🕸️ **Enhanced Web Scraping**: Uses `Selenium` for web content fetching, effectively handling dynamically loaded pages.
@@ -25,12 +25,13 @@ A modular and automated research report generation tool designed for **in-depth 
 | File/Folder             | Description                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------- |
 | `report_writer.py`      | **(Main)** Orchestrates multi-agent collaboration for planning and writing in-depth research reports using LangGraph. |
-| `agentic_search.py`     | **(Core Module)** Implements the agentic search logic, enabling autonomous and iterative research. |
+| `subagent/agentic_search.py` | **(Core Module)** Implements the agentic search logic, enabling autonomous and iterative research. |
+| `subagent/document_qa.py` | Document QA agent: ReAct loop with text navigator for financial document analysis. |
 | `preprocess_files.py`   | Typer CLI for batch PDF preprocessing. Run as: `python preprocess_files.py INPUT_DIR OUTPUT_DIR [--model] [--no-table]` |
 | `retriever.py`          | Implements the hybrid retriever, combining local vector search with keyword search. |
 | `Prompt/`               | Contains prompt templates for the industry/stock analysis report style. |
-| `State/`                | Defines the state objects used in LangGraph, like `ReportState` and `SectionState`. |
-| `Tools/`                | Includes tools for formatting LLM outputs, such as query generation and feedback processing. |
+| `State/`                | Defines the state objects used in LangGraph (`ReportState`, `SectionState`, `AgenticSearchState`, `DocumentQAState`). |
+| `Tools/`                | LLM output formatters (`tools.py`), `AgentDocumentReader` text navigator with page navigation/search/bookmarks (`text_navigator.py`), Pydantic reader models (`reader_models.py`), and PDF document preprocessors (`document_preprocessors.py`). |
 | `Utils/`                | Contains various utility functions, including web API wrappers, PDF/audio processors, and content deduplication. |
 | `report_config.yaml`    | **(User-created)** Sets model names, report structure, and generation style. |
 | `retriever_config.yaml` | **(User-created)** Configures retriever behavior, text splitting parameters, and the embedding model. |

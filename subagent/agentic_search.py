@@ -4,11 +4,10 @@ import logging
 
 # Load configurations
 import pathlib
-from typing import TypedDict
 
 import omegaconf
 
-_HERE = pathlib.Path(__file__).parent
+_HERE = pathlib.Path(__file__).parent.parent
 config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
 
 LIGHT_MODEL_NAME = config["LIGHT_MODEL_NAME"]
@@ -26,6 +25,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from Prompt.agentic_search_prompt import *
+from State.agentic_search_state import AgenticSearchState
 from Tools.tools import (
     quality_formatter,
     queries_formatter,
@@ -85,20 +85,12 @@ def queries_rewriter(queries: list[str]) -> list[str]:
         tool=[queries_formatter],
         tool_choice="required",
     )
-    queries = results.tool_calls[0]["args"]["queries"]
+    try:
+        queries = results.tool_calls[0]["args"]["queries"]
+    except (IndexError, KeyError, TypeError) as e:
+        logger.error("Failed to parse rewritten queries: %s", e)
+        return queries  # return original queries unchanged
     return queries
-
-
-class AgenticSearchState(TypedDict):
-    queries: list[str]
-    followed_up_queries: list[str]
-    web_results: list[dict]
-    filtered_web_results: list[dict]
-    compressed_web_results: list[dict]
-    source_str: str
-    max_num_iterations: int
-    curr_num_iterations: int
-    url_memo: set[str]
 
 
 async def check_search_quality_async(query: str, document: str) -> int:
@@ -116,7 +108,11 @@ async def check_search_quality_async(query: str, document: str) -> int:
         tool=[quality_formatter],
         tool_choice="required",
     )
-    score = results.tool_calls[0]["args"]["score"]
+    try:
+        score = results.tool_calls[0]["args"]["score"]
+    except (IndexError, KeyError, TypeError) as e:
+        logger.warning("Failed to parse quality score: %s", e)
+        score = 0
     return score
 
 
@@ -156,7 +152,7 @@ def perform_web_search(state: AgenticSearchState):
     url_memo = state.get("url_memo", set())
     queries = state["queries"]
     curr_num_iterations = state.get("curr_num_iterations", 0)
-    followed_up_queries = state.get("followed_up_queries", "")
+    followed_up_queries = state.get("followed_up_queries", [])
     if followed_up_queries:
         logger.info(
             f"Performing followed up web search for original queries: {queries}, followed up queries:{followed_up_queries}"
@@ -183,7 +179,7 @@ def perform_web_search(state: AgenticSearchState):
 
 
 async def filter_and_format_results(state: AgenticSearchState):
-    followed_up_queries = state.get("followed_up_queries", "")
+    followed_up_queries = state.get("followed_up_queries", [])
     queries = followed_up_queries if followed_up_queries else state["queries"]
     web_results = state["web_results"]
     logger.info("Filtering and formatting web search results.")
@@ -240,7 +236,7 @@ async def filter_and_format_results(state: AgenticSearchState):
 
 
 async def compress_raw_content(state: AgenticSearchState):
-    followed_up_queries = state.get("followed_up_queries", "")
+    followed_up_queries = state.get("followed_up_queries", [])
     queries = followed_up_queries if followed_up_queries else state["queries"]
     filtered_web_results = state["filtered_web_results"]
 
@@ -305,9 +301,14 @@ async def compress_raw_content(state: AgenticSearchState):
 
         if compressed_result is not None:
             # Process successful compression
-            summary_content = ""
-            for tool_call in compressed_result.tool_calls:
-                summary_content += tool_call["args"]["summary_content"] + "====" + "\n\n"
+            try:
+                summary_content = ""
+                for tool_call in compressed_result.tool_calls:
+                    summary_content += tool_call["args"]["summary_content"] + "====" + "\n\n"
+            except (IndexError, KeyError, TypeError) as e:
+                logger.warning("Failed to parse compression result: %s", e)
+                final_results[query_idx]["results"].append(original_result)
+                continue
 
             new_result = copy.deepcopy(original_result)
             new_result["raw_content"] = summary_content
@@ -349,7 +350,11 @@ def check_searching_results(state: AgenticSearchState):
         tool=[searching_grader_formatter],
         tool_choice="required",
     )
-    feedback = feedback.tool_calls[0]["args"]
+    try:
+        feedback = feedback.tool_calls[0]["args"]
+    except (IndexError, KeyError, TypeError) as e:
+        logger.error("Failed to parse search grader feedback: %s", e)
+        return Command(goto=END)
     if feedback["grade"] == "pass":
         return Command(goto=END)
     else:

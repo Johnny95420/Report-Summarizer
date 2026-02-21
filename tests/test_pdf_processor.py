@@ -20,18 +20,14 @@ class TestChatLiteLLMImport:
                 )
 
         imports = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module == "langchain_litellm"
+            node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module == "langchain_litellm"
         ]
         names = [alias.name for imp in imports for alias in imp.names]
         assert "ChatLiteLLM" in names, "ChatLiteLLM must be imported from langchain_litellm"
 
     def test_langchain_litellm_in_pyproject(self):
         pyproject = (ROOT / "pyproject.toml").read_text()
-        assert "langchain-litellm" in pyproject, (
-            "langchain-litellm must be declared in pyproject.toml dependencies"
-        )
+        assert "langchain-litellm" in pyproject, "langchain-litellm must be declared in pyproject.toml dependencies"
 
 
 class TestJsonDumpEnsureAscii:
@@ -89,11 +85,7 @@ class TestParseBugFixes:
         loop_var = for_loops[0].target.id  # e.g. "file_path"
 
         with_items = [n for n in ast.walk(parse_fn) if isinstance(n, ast.withitem)]
-        handle_names = [
-            item.optional_vars.id
-            for item in with_items
-            if isinstance(item.optional_vars, ast.Name)
-        ]
+        handle_names = [item.optional_vars.id for item in with_items if isinstance(item.optional_vars, ast.Name)]
         assert loop_var not in handle_names, (
             f"Loop variable '{loop_var}' must not be reused as a file handle — "
             "this shadows the path on the second iteration"
@@ -110,10 +102,7 @@ class TestParseBugFixes:
         direct_assigns = [
             n
             for n in for_loop.body
-            if isinstance(n, ast.Assign)
-            and any(
-                isinstance(t, ast.Name) and t.id == "tables" for t in n.targets
-            )
+            if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "tables" for t in n.targets)
         ]
         assert direct_assigns, (
             "'tables' must be assigned unconditionally in parse() loop body "
@@ -129,8 +118,7 @@ class TestParseBugFixes:
             (
                 n
                 for n in ast.walk(tree)
-                if isinstance(n, ast.AsyncFunctionDef)
-                and n.name == "financial_report_metadata_extraction"
+                if isinstance(n, ast.AsyncFunctionDef) and n.name == "financial_report_metadata_extraction"
             ),
             None,
         )
@@ -142,20 +130,13 @@ class TestParseBugFixes:
         for try_node in try_nodes:
             for handler in try_node.handlers:
                 # handler must capture the exception (as e) and call logger.warning
-                assert handler.name is not None, (
-                    "except clause must capture exception with 'as e' to enable logging"
-                )
+                assert handler.name is not None, "except clause must capture exception with 'as e' to enable logging"
                 warning_calls = [
                     n
                     for n in ast.walk(handler)
-                    if isinstance(n, ast.Call)
-                    and isinstance(n.func, ast.Attribute)
-                    and n.func.attr == "warning"
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "warning"
                 ]
-                assert warning_calls, (
-                    "except handler must call logger.warning() — "
-                    "bare except swallows errors silently"
-                )
+                assert warning_calls, "except handler must call logger.warning() — bare except swallows errors silently"
 
 
 class TestPreprocessFilesCLI:
