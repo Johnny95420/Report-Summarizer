@@ -33,3 +33,7 @@ Thumbs.db
 htmlcov/
 .coverage
 raw*
+
+# ── Navigator generated files ─────────────────────────────────────────
+reader_tmp/
+navigator_tmp/
