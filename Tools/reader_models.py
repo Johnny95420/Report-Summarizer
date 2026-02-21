@@ -3,7 +3,7 @@ import json
 import re
 
 from langchain_core.documents import Document
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|\s]+')
 
@@ -20,27 +20,29 @@ def sanitize_name(name: str) -> str:
 
 
 class SearchResult(BaseModel):
-    page_id: int
-    score: float | None   # None for keyword search (BM25 has no relevance score)
-    page_preview: str     # first 250 chars of that page
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    page_id: int
+    score: float | None  # None for keyword search (BM25 has no relevance score)
+    page_preview: str  # first 250 chars of that page
 
 
 class BaseReaderDocument(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     date: str | None
     name: str
     outlines: list[dict]
     pages: list[Document]
 
-    class Config:
-        arbitrary_types_allowed = True
-
     def save(self, path: str) -> None:
-        """Serialize to JSON — Document objects serialized via model_dump()."""
-        data = self.model_dump()
-        data["pages"] = [p.model_dump() for p in self.pages]
+        """Serialize to JSON — Document objects serialized explicitly to avoid double-serialization."""
+        data = {
+            "date": self.date,
+            "name": self.name,
+            "outlines": self.outlines,
+            "pages": [{"page_content": p.page_content, "metadata": p.metadata} for p in self.pages],
+        }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -61,9 +63,14 @@ class PDFReaderDocument(BaseReaderDocument):
     tables: list[Document]
 
     def save(self, path: str) -> None:
-        data = self.model_dump()
-        data["pages"] = [p.model_dump() for p in self.pages]
-        data["tables"] = [t.model_dump() for t in self.tables]
+        data = {
+            "date": self.date,
+            "name": self.name,
+            "outlines": self.outlines,
+            "highlights": self.highlights,
+            "pages": [{"page_content": p.page_content, "metadata": p.metadata} for p in self.pages],
+            "tables": [{"page_content": t.page_content, "metadata": t.metadata} for t in self.tables],
+        }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 

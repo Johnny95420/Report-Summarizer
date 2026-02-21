@@ -68,7 +68,12 @@ class TestPDFReaderDocumentRoundtrip:
         pages = [Document(page_content="page", metadata={"page_id": 0})]
         tables = [Document(page_content="table summary", metadata={"table": "<table/>"})]
         doc = PDFReaderDocument(
-            date="2026-02-01", name="pdf-test", outlines=[], pages=pages, highlights="hi", tables=tables,
+            date="2026-02-01",
+            name="pdf-test",
+            outlines=[],
+            pages=pages,
+            highlights="hi",
+            tables=tables,
         )
 
         path = str(tmp_path / "pdf.json")

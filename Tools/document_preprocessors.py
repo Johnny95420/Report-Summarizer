@@ -40,13 +40,15 @@ class BaseDocumentPreprocessor(ABC):
                 outlines.append({"page_id": page_id, "table_summary": doc.page_content[:200]})
             else:
                 headings = re.findall(r"^(#{1,3})\s+(.+)", doc.page_content, re.MULTILINE)
-                outlines.append({
-                    "page_id": page_id,
-                    "headers": [
-                        {"header_level": len(hashes), "title": title.strip()[:20] + "...[truncated]"}
-                        for hashes, title in headings
-                    ],
-                })
+                outlines.append(
+                    {
+                        "page_id": page_id,
+                        "headers": [
+                            {"header_level": len(hashes), "title": title.strip()[:20] + "...[truncated]"}
+                            for hashes, title in headings
+                        ],
+                    }
+                )
         return outlines
 
 
@@ -109,10 +111,12 @@ class PDFDocumentPreprocessor(BaseDocumentPreprocessor):
                     full_content = information["full_content"]
                 except KeyError:
                     raise KeyError(f"Missing 'full_content' key in file: {file}")
-                main_docs.append(Document(
-                    full_content,
-                    metadata={"path": file, "date": date},
-                ))
+                main_docs.append(
+                    Document(
+                        full_content,
+                        metadata={"path": file, "date": date},
+                    )
+                )
 
         text_splits = text_splitter.split_documents(main_docs)
         doc_splits = text_splits + table_docs
@@ -135,13 +139,9 @@ class PDFDocumentPreprocessor(BaseDocumentPreprocessor):
         date = information.get("date")
         if date is None or date == "None":
             logger.warning("Cannot get date from content in file: %s. Trying filename.", file)
-            try:
-                date = name.split("-")[-1]
-                if "_" in date:
-                    date = date.split("_")[0]
-            except Exception:
-                logger.warning("Cannot parse date from filename: %s. Setting to None.", file)
-                date = None
+            date = name.split("-")[-1]
+            if "_" in date:
+                date = date.split("_")[0]
         return date
 
     def _process_table(self, file: str, name: str, information: dict) -> Document | None:

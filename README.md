@@ -31,7 +31,7 @@ A modular and automated research report generation tool designed for **in-depth 
 | `retriever.py`          | Implements the hybrid retriever, combining local vector search with keyword search. |
 | `Prompt/`               | Contains prompt templates for the industry/stock analysis report style. |
 | `State/`                | Defines the state objects used in LangGraph (`ReportState`, `SectionState`, `AgenticSearchState`, `DocumentQAState`). |
-| `Tools/`                | Includes tools for formatting LLM outputs, such as query generation and feedback processing. |
+| `Tools/`                | LLM output formatters (`tools.py`), `AgentDocumentReader` text navigator with page navigation/search/bookmarks (`text_navigator.py`), Pydantic reader models (`reader_models.py`), and PDF document preprocessors (`document_preprocessors.py`). |
 | `Utils/`                | Contains various utility functions, including web API wrappers, PDF/audio processors, and content deduplication. |
 | `report_config.yaml`    | **(User-created)** Sets model names, report structure, and generation style. |
 | `retriever_config.yaml` | **(User-created)** Configures retriever behavior, text splitting parameters, and the embedding model. |

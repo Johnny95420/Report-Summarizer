@@ -16,3 +16,4 @@ class DocumentQAState(MessagesState):
     answer: str  # output
     iteration: int  # budget tracking
     budget: int  # max iterations
+    consecutive_errors: int  # track consecutive LLM failures

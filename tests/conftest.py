@@ -35,6 +35,7 @@ FAKE_CONFIG = {
     "REPORT_STRUCTURE": "default",
     # retriever config (raw_file_path=None skips data loading)
     "raw_file_path": None,
+    "navigator_top_k": 5,
 }
 
 

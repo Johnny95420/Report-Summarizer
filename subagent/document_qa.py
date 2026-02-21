@@ -11,6 +11,7 @@ Graph topology:
                  └→ [agent]  (text-only planning, no tool calls → loop back)
 """
 
+import asyncio
 import logging
 import pathlib
 
@@ -96,11 +97,21 @@ def agent_node(state: DocumentQAState, config: RunnableConfig):
     messages = list(state["messages"]) + [HumanMessage(content=reminder)]
 
     logger.info("[agent] Iteration %d/%d — calling LLM (%s)", iteration, budget, MODEL_NAME)
+    consecutive_errors = state.get("consecutive_errors", 0)
     try:
         response = call_llm(MODEL_NAME, BACKUP_MODEL_NAME, messages, tool=tools)
+        consecutive_errors = 0
     except Exception as e:
         logger.error("[agent] LLM call failed at iteration %d: %s", iteration, e)
-        response = AIMessage(content=f"[LLM error: {e}. Retrying next iteration — consider simplifying your tool calls.]")
+        consecutive_errors += 1
+        if consecutive_errors >= 3:
+            response = AIMessage(
+                content=f"[LLM failed {consecutive_errors} times consecutively. Forcing answer submission.]"
+            )
+        else:
+            response = AIMessage(
+                content=f"[LLM error: {e}. Retrying next iteration — consider simplifying your tool calls.]"
+            )
 
     # Log response summary
     tool_calls = getattr(response, "tool_calls", [])
@@ -113,7 +124,7 @@ def agent_node(state: DocumentQAState, config: RunnableConfig):
     text_preview = text[:150].replace("\n", " ") if text else "(empty)"
     logger.info("[agent] Iteration %d/%d — tools=%s, text=%s", iteration, budget, tool_names, text_preview)
 
-    return {"messages": [response], "iteration": iteration}
+    return {"messages": [response], "iteration": iteration, "consecutive_errors": consecutive_errors}
 
 
 def extract_answer_node(state: DocumentQAState):
@@ -124,24 +135,22 @@ def extract_answer_node(state: DocumentQAState):
     for tc in getattr(last_msg, "tool_calls", []):
         if tc["name"] == "submit_answer":
             answer = tc["args"].get("answer", "")
-            tool_messages.append(
-                ToolMessage(content="[Answer submitted. Task complete.]", tool_call_id=tc["id"])
-            )
+            tool_messages.append(ToolMessage(content="[Answer submitted. Task complete.]", tool_call_id=tc["id"]))
             logger.info("[extract_answer] Got answer via submit_answer (%d chars)", len(answer))
             break
     if not answer:
         # Fallback: extract text content from AIMessage
         content = last_msg.content
         if isinstance(content, list):
-            answer = "\n".join(
-                b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
-            )
+            answer = "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
         else:
             answer = str(content)
         if answer:
             logger.warning("[extract_answer] No submit_answer found, using text fallback (%d chars)", len(answer))
         else:
-            logger.error("[extract_answer] No submit_answer found and text fallback is empty")
+            raise RuntimeError(
+                "Failed to extract any answer — both submit_answer and text fallback produced empty results"
+            )
     return {"answer": answer, "messages": tool_messages}
 
 
@@ -164,8 +173,10 @@ def force_answer_node(state: DocumentQAState):
         response = call_llm(MODEL_NAME, BACKUP_MODEL_NAME, messages, tool=[submit_answer], tool_choice="required")
     except Exception as e:
         logger.error("[force_answer] LLM call failed: %s", e)
-        response = AIMessage(content=f"[LLM error during forced answer: {e}]")
-    logger.info("[force_answer] LLM responded, tool_calls=%s", [tc["name"] for tc in getattr(response, "tool_calls", [])])
+        raise RuntimeError(f"Force answer LLM call failed after budget exhaustion: {e}") from e
+    logger.info(
+        "[force_answer] LLM responded, tool_calls=%s", [tc["name"] for tc in getattr(response, "tool_calls", [])]
+    )
 
     return {"messages": [response]}
 
@@ -183,18 +194,23 @@ def route_response(state: DocumentQAState) -> str:
         logger.info("[route] submit_answer detected → extract_answer")
         return "extract_answer"
 
-    # 2. Budget exhausted → force answer
+    # 2. Consecutive LLM errors → force answer
+    if state.get("consecutive_errors", 0) >= 3:
+        logger.warning("[route] %d consecutive errors → force_answer", state.get("consecutive_errors", 0))
+        return "force_answer"
+
+    # 3. Budget exhausted → force answer
     if state.get("iteration", 0) >= state["budget"]:
         logger.warning("[route] Budget exhausted (%d/%d) → force_answer", state.get("iteration", 0), state["budget"])
         return "force_answer"
 
-    # 3. Has tool calls → execute them
+    # 4. Has tool calls → execute them
     if tool_calls:
         tool_names = [tc["name"] for tc in tool_calls]
         logger.info("[route] Tool calls %s → tools", tool_names)
         return "tools"
 
-    # 4. No tool calls (text-only planning) → loop back to agent
+    # 5. No tool calls (text-only planning) → loop back to agent
     logger.info("[route] No tool calls (planning) → agent")
     return "agent"
 
@@ -277,19 +293,26 @@ def run_document_qa(
 
     graph = build_document_qa_graph(all_tools)
 
-    result = graph.invoke(
-        {
-            "messages": [SystemMessage(content=system_prompt), HumanMessage(content=question)],
-            "file_paths": file_paths,
-            "question": question,
-            "budget": budget,
-            "iteration": 0,
-            "answer": "",
-        },
-        config={"configurable": {"tools": all_tools}},
-    )
+    try:
+        result = graph.invoke(
+            {
+                "messages": [SystemMessage(content=system_prompt), HumanMessage(content=question)],
+                "file_paths": file_paths,
+                "question": question,
+                "budget": budget,
+                "iteration": 0,
+                "answer": "",
+                "consecutive_errors": 0,
+            },
+            config={"configurable": {"tools": all_tools}},
+        )
+    except RuntimeError as e:
+        raise RuntimeError(f"Document QA failed: {e}") from e
 
-    return result["answer"]
+    answer = result["answer"]
+    if not answer or not answer.strip():
+        raise RuntimeError("Document QA completed but produced an empty answer")
+    return answer
 
 
 async def run_document_qa_async(
@@ -316,18 +339,24 @@ async def run_document_qa_async(
 
     graph = build_document_qa_graph(all_tools)
 
-    result = await graph.ainvoke(
-        {
-            "messages": [SystemMessage(content=system_prompt), HumanMessage(content=question)],
-            "file_paths": file_paths,
-            "question": question,
-            "budget": budget,
-            "iteration": 0,
-            "answer": "",
-        },
-        config={"configurable": {"tools": all_tools}},
-    )
+    try:
+        result = await asyncio.to_thread(
+            graph.invoke,
+            {
+                "messages": [SystemMessage(content=system_prompt), HumanMessage(content=question)],
+                "file_paths": file_paths,
+                "question": question,
+                "budget": budget,
+                "iteration": 0,
+                "answer": "",
+                "consecutive_errors": 0,
+            },
+            {"configurable": {"tools": all_tools}},
+        )
+    except RuntimeError as e:
+        raise RuntimeError(f"Document QA failed: {e}") from e
 
-    return result["answer"]
-
-
+    answer = result["answer"]
+    if not answer or not answer.strip():
+        raise RuntimeError("Document QA completed but produced an empty answer")
+    return answer

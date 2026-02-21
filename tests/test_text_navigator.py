@@ -18,21 +18,20 @@ from Tools.text_navigator import AgentDocumentReader, Bookmark
 # Helpers
 # ---------------------------------------------------------------------------
 def _make_base_doc(name="test-doc", num_pages=3) -> BaseReaderDocument:
-    pages = [
-        Document(page_content=f"Page {i} content for {name}", metadata={"page_id": i})
-        for i in range(num_pages)
-    ]
+    pages = [Document(page_content=f"Page {i} content for {name}", metadata={"page_id": i}) for i in range(num_pages)]
     return BaseReaderDocument(date="2026-01-01", name=name, outlines=[], pages=pages)
 
 
 def _make_pdf_doc(name="pdf-doc", num_pages=3) -> PDFReaderDocument:
-    pages = [
-        Document(page_content=f"Page {i} content for {name}", metadata={"page_id": i})
-        for i in range(num_pages)
-    ]
+    pages = [Document(page_content=f"Page {i} content for {name}", metadata={"page_id": i}) for i in range(num_pages)]
     tables = [Document(page_content="table summary", metadata={"page_id": 0, "table": "<table>...</table>"})]
     return PDFReaderDocument(
-        date="2026-01-01", name=name, outlines=[], pages=pages, highlights="key insight", tables=tables,
+        date="2026-01-01",
+        name=name,
+        outlines=[],
+        pages=pages,
+        highlights="key insight",
+        tables=tables,
     )
 
 
@@ -296,3 +295,141 @@ class TestMakeResult:
         sr = reader._make_result(result_doc, score=0.5)
         assert sr.page_id == 99
         assert "error" in sr.page_preview
+
+
+# ---------------------------------------------------------------------------
+# Chroma cache validation (C1)
+# ---------------------------------------------------------------------------
+class TestChromaCacheValidation:
+    def test_stale_cache_triggers_rebuild(self, reader, tmp_path):
+        """When Chroma cache count != page count, cache should be rebuilt (C1 fix)."""
+        doc = _make_base_doc(num_pages=5)
+        path = _write_doc_json(tmp_path, doc)
+
+        fake_embeddings = MagicMock()
+        fake_collection = MagicMock()
+        fake_collection.count.return_value = 3  # stale: 3 != 5
+
+        fake_vectorstore = MagicMock()
+        fake_vectorstore._collection = fake_collection
+
+        with (
+            patch("Tools.text_navigator.get_embedding_model", return_value=fake_embeddings),
+            patch("Tools.text_navigator.Chroma") as mock_chroma,
+            patch("Tools.text_navigator.BM25Retriever") as mock_bm25,
+            patch("os.path.exists", side_effect=lambda p: p == path or "nav_store" in str(p)),
+            patch("shutil.rmtree") as mock_rmtree,
+        ):
+            mock_chroma.return_value = fake_vectorstore
+            mock_chroma.from_documents.return_value = MagicMock()
+            mock_bm25.from_documents.return_value = MagicMock()
+
+            reader.open_document(path)
+
+            # Should have rebuilt: rmtree called, then from_documents
+            mock_rmtree.assert_called_once()
+            mock_chroma.from_documents.assert_called_once()
+
+    def test_valid_cache_not_rebuilt(self, reader, tmp_path):
+        """When Chroma cache count matches page count, no rebuild needed."""
+        doc = _make_base_doc(num_pages=3)
+        path = _write_doc_json(tmp_path, doc)
+
+        fake_embeddings = MagicMock()
+        fake_collection = MagicMock()
+        fake_collection.count.return_value = 3  # matches
+
+        fake_vectorstore = MagicMock()
+        fake_vectorstore._collection = fake_collection
+
+        with (
+            patch("Tools.text_navigator.get_embedding_model", return_value=fake_embeddings),
+            patch("Tools.text_navigator.Chroma") as mock_chroma,
+            patch("Tools.text_navigator.BM25Retriever") as mock_bm25,
+            patch("os.path.exists", side_effect=lambda p: p == path or "nav_store" in str(p)),
+        ):
+            mock_chroma.return_value = fake_vectorstore
+            mock_bm25.from_documents.return_value = MagicMock()
+
+            reader.open_document(path)
+
+            # Should NOT have rebuilt
+            mock_chroma.from_documents.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Chroma cleanup on document switch (C7)
+# ---------------------------------------------------------------------------
+class TestChromaCleanup:
+    def test_vectorstore_cleaned_on_switch(self, reader, tmp_path, mock_indexing):
+        """Old vectorstore should be cleaned up when switching documents (C7 fix)."""
+        doc_a = _make_base_doc(name="doc-A")
+        doc_b = _make_base_doc(name="doc-B")
+        path_a = _write_doc_json(tmp_path, doc_a, "a.json")
+        path_b = _write_doc_json(tmp_path, doc_b, "b.json")
+
+        reader.open_document(path_a)
+        old_vectorstore = reader._vectorstore
+
+        reader.open_document(path_b)
+        old_vectorstore.delete_collection.assert_called_once()
+
+    def test_close_document_cleans_vectorstore(self, reader, tmp_path, mock_indexing):
+        """close_document should clean up vectorstore (C7 fix)."""
+        doc = _make_base_doc()
+        path = _write_doc_json(tmp_path, doc)
+        reader.open_document(path)
+        vectorstore = reader._vectorstore
+
+        reader.close_document()
+        vectorstore.delete_collection.assert_called_once()
+        assert reader._vectorstore is None
+
+    def test_close_document_suppresses_delete_error(self, reader, tmp_path, mock_indexing):
+        """delete_collection() raising must not propagate (contextlib.suppress)."""
+        doc = _make_base_doc()
+        path = _write_doc_json(tmp_path, doc)
+        reader.open_document(path)
+        reader._vectorstore.delete_collection.side_effect = RuntimeError("already deleted")
+
+        reader.close_document()  # must not raise
+        assert reader._vectorstore is None
+
+    def test_switch_document_suppresses_delete_error(self, reader, tmp_path, mock_indexing):
+        """delete_collection() error on switch must not propagate."""
+        doc_a = _make_base_doc(name="doc-A")
+        doc_b = _make_base_doc(name="doc-B")
+        path_a = _write_doc_json(tmp_path, doc_a, "a.json")
+        path_b = _write_doc_json(tmp_path, doc_b, "b.json")
+
+        reader.open_document(path_a)
+        reader._vectorstore.delete_collection.side_effect = RuntimeError("broken")
+
+        # Switch should succeed despite cleanup error
+        result = reader.open_document(path_b)
+        assert "doc-B" in result
+
+
+# ---------------------------------------------------------------------------
+# get_embedding_model error handling (C9)
+# ---------------------------------------------------------------------------
+class TestGetEmbeddingModelErrors:
+    def test_embedding_model_load_failure(self):
+        """Embedding model load failure should raise RuntimeError (C9 fix)."""
+        import Tools.text_navigator as tn
+
+        # Reset singleton
+        old_model = tn._embedding_model
+        old_name = tn._embedding_model_name
+        tn._embedding_model = None
+        tn._embedding_model_name = ""
+
+        try:
+            with (
+                patch("Tools.text_navigator.HuggingFaceEmbeddings", side_effect=OSError("disk full")),
+                pytest.raises(RuntimeError, match="Failed to load embedding model"),
+            ):
+                tn.get_embedding_model("bad-model")
+        finally:
+            tn._embedding_model = old_model
+            tn._embedding_model_name = old_name

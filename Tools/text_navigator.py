@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import os
@@ -38,7 +39,12 @@ def get_embedding_model(model_name: str = "Qwen/Qwen3-Embedding-0.6B") -> Huggin
     with _embedding_lock:
         # Double-checked locking
         if _embedding_model is None or _embedding_model_name != model_name:
-            _embedding_model = HuggingFaceEmbeddings(model_name=model_name)
+            try:
+                _embedding_model = HuggingFaceEmbeddings(model_name=model_name)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to load embedding model '{model_name}': {e}. Check network, disk space, or model name."
+                ) from e
             _embedding_model_name = model_name
     return _embedding_model
 
@@ -96,8 +102,7 @@ class AgentDocumentReader:
         # Dedup: skip reload if same document is already open
         if self._current_path == path and self._document is not None:
             return (
-                f"[Already open: {self._document.name} | {len(self._document.pages)} pages"
-                f" | page {self._current_page}]"
+                f"[Already open: {self._document.name} | {len(self._document.pages)} pages | page {self._current_page}]"
             )
 
         with open(path, encoding="utf-8") as f:
@@ -111,6 +116,11 @@ class AgentDocumentReader:
         else:
             doc = BaseReaderDocument(**raw)
 
+        # Cleanup previous vectorstore before building new one
+        if self._vectorstore is not None:
+            with contextlib.suppress(Exception):
+                self._vectorstore.delete_collection()
+
         # Build vectorstore + BM25 before committing state so a failure
         # doesn't leave the reader in a half-initialised state.
         try:
@@ -123,6 +133,22 @@ class AgentDocumentReader:
                     persist_directory=persist_path,
                     embedding_function=embeddings,
                 )
+                # Validate cache: rebuild if page count changed
+                cached_count = vectorstore._collection.count()
+                if cached_count != len(doc.pages):
+                    logger.warning(
+                        "Chroma cache stale (%d vs %d pages), rebuilding",
+                        cached_count,
+                        len(doc.pages),
+                    )
+                    import shutil
+
+                    shutil.rmtree(persist_path)
+                    vectorstore = Chroma.from_documents(
+                        documents=doc.pages,
+                        embedding=embeddings,
+                        persist_directory=persist_path,
+                    )
             else:
                 vectorstore = Chroma.from_documents(
                     documents=doc.pages,
@@ -150,6 +176,9 @@ class AgentDocumentReader:
 
     def close_document(self) -> None:
         """Clear all state and free resources."""
+        if self._vectorstore is not None:
+            with contextlib.suppress(Exception):
+                self._vectorstore.delete_collection()
         self._document = None
         self._vectorstore = None
         self._bm25 = None
@@ -228,10 +257,7 @@ class AgentDocumentReader:
 
     def show_bookmarks(self) -> dict:
         """Return all saved bookmarks as {label: {doc, page_id}}."""
-        return {
-            label: {"doc": bm.doc_name, "page_id": bm.page_id}
-            for label, bm in self._bookmarks.items()
-        }
+        return {label: {"doc": bm.doc_name, "page_id": bm.page_id} for label, bm in self._bookmarks.items()}
 
     def go_to_bookmark(self, label: str) -> str:
         """Move cursor to the page saved under *label*, auto-switching document if needed."""
@@ -252,6 +278,7 @@ class AgentDocumentReader:
         """Vector similarity search. Returns up to *k* SearchResult objects."""
         self._require_open()
         import warnings
+
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Relevance scores must be between 0 and 1")
             results = self._vectorstore.similarity_search_with_relevance_scores(query, k=k)
@@ -287,7 +314,9 @@ class AgentDocumentReader:
             logger.warning("Search result missing 'page_id' metadata — defaulting to 0")
             page_id = 0
         if not (0 <= page_id < len(self._document.pages)):
-            logger.error("page_id %d out of range [0, %d) — returning empty preview", page_id, len(self._document.pages))
+            logger.error(
+                "page_id %d out of range [0, %d) — returning empty preview", page_id, len(self._document.pages)
+            )
             return SearchResult(page_id=page_id, score=score, page_preview="[error: page_id out of range]")
         page_content = self._document.pages[page_id].page_content
         return SearchResult(
