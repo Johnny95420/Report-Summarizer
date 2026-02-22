@@ -22,10 +22,6 @@ from Tools.reader_models import sanitize_name
 from Tools.text_navigator import AgentDocumentReader
 
 
-def pytest_configure(config):
-    config.addinivalue_line("markers", "integration: Chroma SQLite cache integration tests")
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

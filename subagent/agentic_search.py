@@ -175,6 +175,7 @@ def perform_web_search(state: AgenticSearchState):
     return {
         "web_results": dedup_results,
         "curr_num_iterations": curr_num_iterations + 1,
+        "url_memo": url_memo,
     }
 
 
@@ -187,7 +188,7 @@ async def filter_and_format_results(state: AgenticSearchState):
     # Create semaphore to limit concurrent operations
     semaphore = asyncio.Semaphore(2)
 
-    async def check_quality_with_metadata(query: str, result: dict) -> tuple[str, dict, int]:
+    async def check_quality_with_metadata(query: str, result: dict) -> tuple[str, dict, int | None]:
         """Check quality with semaphore control and metadata preservation."""
         async with semaphore:
             try:
@@ -197,8 +198,8 @@ async def filter_and_format_results(state: AgenticSearchState):
                 score = await check_search_quality_async(query, document)
                 return query, result, score
             except Exception as e:
-                logger.warning(f"Quality check failed for result {result.get('url', 'unknown')}: {e}")
-                return query, result, 0  # Return 0 score for failed checks
+                logger.error(f"Quality check failed for result {result.get('url', 'unknown')}: {e}")
+                return query, result, None  # None score: include result rather than silently discard
 
     # Create tasks with metadata preserved
     quality_tasks = []
@@ -206,23 +207,22 @@ async def filter_and_format_results(state: AgenticSearchState):
         for result in response["results"]:
             quality_tasks.append(check_quality_with_metadata(query, result))
 
-    # Execute all quality checks with error handling
-    try:
-        quality_results = await asyncio.gather(*quality_tasks, return_exceptions=True)
-    except Exception as e:
-        logger.error(f"Batch quality check failed: {e}")
-        return {"filtered_web_results": [{"results": []} for _ in queries]}
+    # asyncio.gather with return_exceptions=True never raises; exceptions become list elements
+    quality_results = await asyncio.gather(*quality_tasks, return_exceptions=True)
 
     # Process results with error handling
     results_by_query = {query: [] for query in queries}
 
     for quality_result in quality_results:
         if isinstance(quality_result, Exception):
-            logger.warning(f"Quality check exception: {quality_result}")
+            logger.error(f"Quality check exception: {quality_result}")
             continue
 
         query, search_result, score = quality_result
-        if score is not None and score > 2:
+        if score is None:
+            # LLM failed: include result rather than silently discard the entire corpus
+            results_by_query[query].append(search_result)
+        elif score > 2:
             search_result["score"] = score
             results_by_query[query].append(search_result)
 
@@ -271,7 +271,7 @@ async def compress_raw_content(state: AgenticSearchState):
                 return query_idx, result_idx, result, compressed_result
 
             except Exception as e:
-                logger.warning(f"Content compression failed for result {result.get('url', 'unknown')}: {e}")
+                logger.error(f"Content compression failed for result {result.get('url', 'unknown')}: {e}")
                 # Return original result with empty summary on failure
                 return query_idx, result_idx, result, None
 
@@ -281,12 +281,8 @@ async def compress_raw_content(state: AgenticSearchState):
         for result_idx, result in enumerate(results["results"]):
             compression_tasks.append(compress_content_with_metadata(query_idx, result_idx, query, result))
 
-    # Execute all compression tasks with error handling
-    try:
-        compression_results = await asyncio.gather(*compression_tasks, return_exceptions=True)
-    except Exception as e:
-        logger.error(f"Batch compression failed: {e}")
-        return {"compressed_web_results": [{"results": []} for _ in queries]}
+    # asyncio.gather with return_exceptions=True never raises; exceptions become list elements
+    compression_results = await asyncio.gather(*compression_tasks, return_exceptions=True)
 
     # Organize results back into the original structure
     final_results = [{"results": []} for _ in range(len(queries))]
@@ -294,7 +290,7 @@ async def compress_raw_content(state: AgenticSearchState):
     successful_compressions = 0
     for compression_result in compression_results:
         if isinstance(compression_result, Exception):
-            logger.warning(f"Compression exception: {compression_result}")
+            logger.error(f"Compression exception: {compression_result}")
             continue
 
         query_idx, result_idx, original_result, compressed_result = compression_result
@@ -306,7 +302,7 @@ async def compress_raw_content(state: AgenticSearchState):
                 for tool_call in compressed_result.tool_calls:
                     summary_content += tool_call["args"]["summary_content"] + "====" + "\n\n"
             except (IndexError, KeyError, TypeError) as e:
-                logger.warning("Failed to parse compression result: %s", e)
+                logger.error("Failed to parse compression result: %s", e)
                 final_results[query_idx]["results"].append(original_result)
                 continue
 

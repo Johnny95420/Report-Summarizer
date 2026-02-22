@@ -16,6 +16,13 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---------------------------------------------------------------------------
+# Custom markers
+# ---------------------------------------------------------------------------
+def pytest_configure(config):
+    config.addinivalue_line("markers", "integration: integration tests that run without external services")
+
+
+# ---------------------------------------------------------------------------
 # Fake config that satisfies every module-level OmegaConf.load() call
 # ---------------------------------------------------------------------------
 FAKE_CONFIG = {

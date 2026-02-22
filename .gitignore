@@ -37,3 +37,7 @@ raw*
 # ── Navigator generated files ─────────────────────────────────────────
 reader_tmp/
 navigator_tmp/
+AGENTS.md
+
+# ── Git worktrees ─────────────────────────────────────────────────────
+.worktrees/
