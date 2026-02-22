@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from subagent.document_qa import (
     _build_iteration_reminder,
+    _prepare_qa_session,
     _validate_inputs,
     agent_node,
     extract_answer_node,
@@ -120,11 +121,12 @@ class TestExtractAnswerNode:
         result = extract_answer_node(state)
         assert "block answer" in result["answer"]
 
-    def test_empty_answer_raises(self):
+    def test_empty_answer_returns_sentinel(self):
+        """extract_answer_node should return sentinel on empty content (C6 fix)."""
         msg = AIMessage(content="")
         state = _make_state(msg)
-        with pytest.raises(RuntimeError, match="Failed to extract any answer"):
-            extract_answer_node(state)
+        result = extract_answer_node(state)
+        assert result["answer"] == "[Unable to extract answer from documents]"
 
     def test_only_first_submit_answer_used(self):
         """If LLM emits two submit_answer calls, only the first is used."""
@@ -241,17 +243,20 @@ class TestAgentNodeConsecutiveErrors:
 
 
 # ---------------------------------------------------------------------------
-# force_answer_node: RuntimeError on LLM failure (C3)
+# force_answer_node: degraded answer on LLM failure (C1)
 # ---------------------------------------------------------------------------
 class TestForceAnswerNode:
-    def test_llm_failure_raises_runtime_error(self):
-        """force_answer_node should raise RuntimeError when LLM fails (C3 fix)."""
+    def test_llm_failure_returns_degraded_answer(self):
+        """force_answer_node should return synthetic submit_answer on LLM failure (C1 fix)."""
         state = _make_state(AIMessage(content=""), iteration=50, budget=50)
-        with (
-            patch("subagent.document_qa.call_llm", side_effect=Exception("network error")),
-            pytest.raises(RuntimeError, match="Force answer LLM call failed"),
-        ):
-            force_answer_node(state)
+        with patch("subagent.document_qa.call_llm", side_effect=Exception("network error")):
+            result = force_answer_node(state)
+        assert len(result["messages"]) == 1
+        msg = result["messages"][0]
+        assert isinstance(msg, AIMessage)
+        assert msg.tool_calls
+        assert msg.tool_calls[0]["name"] == "submit_answer"
+        assert msg.tool_calls[0]["args"]["answer"]  # non-empty fallback answer
 
     def test_success_returns_messages(self):
         """force_answer_node should return LLM response on success."""
@@ -264,11 +269,11 @@ class TestForceAnswerNode:
 
 
 # ---------------------------------------------------------------------------
-# run_document_qa: answer validation (C5)
+# run_document_qa: answer validation and error propagation
 # ---------------------------------------------------------------------------
 class TestRunDocumentQA:
-    def test_reraises_runtime_error_from_graph(self):
-        """run_document_qa should re-raise RuntimeError from graph.invoke (C5 fix)."""
+    def test_graph_error_propagates(self):
+        """run_document_qa should propagate errors from graph.invoke."""
         with (
             patch("subagent.document_qa.build_document_qa_graph") as mock_build,
             patch("subagent.document_qa.AgentDocumentReader"),
@@ -276,11 +281,11 @@ class TestRunDocumentQA:
             mock_graph = MagicMock()
             mock_graph.invoke.side_effect = RuntimeError("graph crash")
             mock_build.return_value = mock_graph
-            with pytest.raises(RuntimeError, match="Document QA failed"):
+            with pytest.raises(RuntimeError, match="graph crash"):
                 run_document_qa([{"name": "a", "path": "/a"}], "question?", 10)
 
     def test_raises_on_empty_answer(self):
-        """run_document_qa should raise RuntimeError when answer is whitespace-only (C5 fix)."""
+        """run_document_qa should raise RuntimeError when answer is whitespace-only."""
         with (
             patch("subagent.document_qa.build_document_qa_graph") as mock_build,
             patch("subagent.document_qa.AgentDocumentReader"),
@@ -302,3 +307,132 @@ class TestRunDocumentQA:
             mock_build.return_value = mock_graph
             result = run_document_qa([{"name": "a", "path": "/a"}], "question?", 10)
         assert result == "Valid answer here"
+
+
+# ---------------------------------------------------------------------------
+# run_document_qa: navigator cleanup (C2)
+# ---------------------------------------------------------------------------
+class TestRunDocumentQACleanup:
+    def test_navigator_closed_on_success(self):
+        """run_document_qa should close navigator even on success (C2 fix)."""
+        with (
+            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
+            patch("subagent.document_qa.AgentDocumentReader") as mock_navigator_cls,
+        ):
+            mock_navigator = MagicMock()
+            mock_navigator_cls.return_value = mock_navigator
+            mock_graph = MagicMock()
+            mock_graph.invoke.return_value = {"answer": "Valid answer"}
+            mock_build.return_value = mock_graph
+
+            run_document_qa([{"name": "a", "path": "/a"}], "question?", 10)
+            mock_navigator.close_document.assert_called_once()
+
+    def test_navigator_closed_on_failure(self):
+        """run_document_qa should close navigator even when graph fails (C2 fix)."""
+        with (
+            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
+            patch("subagent.document_qa.AgentDocumentReader") as mock_navigator_cls,
+        ):
+            mock_navigator = MagicMock()
+            mock_navigator_cls.return_value = mock_navigator
+            mock_graph = MagicMock()
+            mock_graph.invoke.side_effect = RuntimeError("crash")
+            mock_build.return_value = mock_graph
+
+            with pytest.raises(RuntimeError):
+                run_document_qa([{"name": "a", "path": "/a"}], "question?", 10)
+            mock_navigator.close_document.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# consecutive_text_only: degenerate loop detection (C4)
+# ---------------------------------------------------------------------------
+class TestConsecutiveTextOnly:
+    def test_increments_on_text_only_response(self):
+        """agent_node should increment consecutive_text_only when no tool calls (C4 fix)."""
+        state = _make_state(AIMessage(content=""), iteration=0, budget=50)
+        state["consecutive_text_only"] = 1
+        state["consecutive_errors"] = 0
+        config = {"configurable": {"tools": []}}
+        with patch("subagent.document_qa.call_llm", return_value=AIMessage(content="planning...")):
+            result = agent_node(state, config)
+        assert result["consecutive_text_only"] == 2
+
+    def test_resets_on_tool_call(self):
+        """agent_node should reset consecutive_text_only when tool calls present (C4 fix)."""
+        state = _make_state(AIMessage(content=""), iteration=0, budget=50)
+        state["consecutive_text_only"] = 2
+        state["consecutive_errors"] = 0
+        config = {"configurable": {"tools": []}}
+        mock_response = AIMessage(content="")
+        mock_response.tool_calls = [{"name": "go_to_page", "args": {"page": 0}, "id": "x"}]
+        with patch("subagent.document_qa.call_llm", return_value=mock_response):
+            result = agent_node(state, config)
+        assert result["consecutive_text_only"] == 0
+
+    def test_route_to_force_answer_at_threshold(self):
+        """route_response should route to force_answer when consecutive_text_only >= 3 (C4 fix)."""
+        msg = AIMessage(content="still planning...")
+        state = _make_state(msg, iteration=5, budget=50)
+        state["consecutive_text_only"] = 3
+        assert route_response(state) == "force_answer"
+
+    def test_route_stays_agent_below_threshold(self):
+        """route_response should stay in agent when consecutive_text_only < 3."""
+        msg = AIMessage(content="planning...")
+        state = _make_state(msg, iteration=5, budget=50)
+        state["consecutive_text_only"] = 2
+        assert route_response(state) == "agent"
+
+
+# ---------------------------------------------------------------------------
+# _prepare_qa_session: shared setup helper (I9)
+# ---------------------------------------------------------------------------
+class TestPrepareQASession:
+    def _call(self, file_paths=None, question="What is X?", budget=10):
+        if file_paths is None:
+            file_paths = [{"name": "doc", "path": "/tmp/doc.json"}]
+        with (
+            patch("subagent.document_qa.AgentDocumentReader") as mock_nav_cls,
+            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
+        ):
+            mock_nav_cls.return_value.get_tools.return_value = []
+            mock_build.return_value = MagicMock()
+            return _prepare_qa_session(file_paths, question, budget)
+
+    def test_initial_state_has_all_required_keys(self):
+        _, _, initial_state, _ = self._call()
+        required = {"file_paths", "question", "answer", "iteration", "budget",
+                    "consecutive_errors", "consecutive_text_only", "messages"}
+        assert required.issubset(initial_state.keys())
+
+    def test_consecutive_text_only_initialized_to_0(self):
+        _, _, initial_state, _ = self._call()
+        assert initial_state["consecutive_text_only"] == 0
+
+    def test_consecutive_errors_initialized_to_0(self):
+        _, _, initial_state, _ = self._call()
+        assert initial_state["consecutive_errors"] == 0
+
+    def test_answer_initialized_to_empty_string(self):
+        _, _, initial_state, _ = self._call()
+        assert initial_state["answer"] == ""
+
+    def test_iteration_initialized_to_0(self):
+        _, _, initial_state, _ = self._call()
+        assert initial_state["iteration"] == 0
+
+    def test_budget_matches_input(self):
+        _, _, initial_state, _ = self._call(budget=25)
+        assert initial_state["budget"] == 25
+
+    def test_invoke_config_has_configurable_with_tools(self):
+        _, _, _, invoke_config = self._call()
+        assert "configurable" in invoke_config
+        assert "tools" in invoke_config["configurable"]
+
+    def test_invoke_config_tools_includes_submit_answer(self):
+        _, _, _, invoke_config = self._call()
+        tool_names = [t.name for t in invoke_config["configurable"]["tools"]]
+        assert "submit_answer" in tool_names

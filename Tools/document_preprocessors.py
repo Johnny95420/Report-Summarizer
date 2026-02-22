@@ -6,6 +6,7 @@ import pathlib
 import re
 from abc import ABC, abstractmethod
 
+import omegaconf
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -15,7 +16,8 @@ logger = logging.getLogger("DocumentPreprocessors")
 logger.setLevel(logging.ERROR)
 
 _PROJECT_ROOT = pathlib.Path(__file__).parent.parent
-_DEFAULT_READER_TMP = str(_PROJECT_ROOT / "reader_tmp")
+_cfg = omegaconf.OmegaConf.load(_PROJECT_ROOT / "retriever_config.yaml")
+_DEFAULT_READER_TMP = str(_PROJECT_ROOT / str(_cfg.get("reader_tmp_dir", "reader_tmp")))
 
 
 class BaseDocumentPreprocessor(ABC):
@@ -44,7 +46,7 @@ class BaseDocumentPreprocessor(ABC):
                     {
                         "page_id": page_id,
                         "headers": [
-                            {"header_level": len(hashes), "title": title.strip()[:20] + "...[truncated]"}
+                            {"header_level": len(hashes), "title": title.strip()[:50] + "...[truncated]"}
                             for hashes, title in headings
                         ],
                     }
@@ -93,7 +95,7 @@ class PDFDocumentPreprocessor(BaseDocumentPreprocessor):
         date: str | None = None
         highlights = ""
 
-        related_files = glob.glob(f"{folder}/{name}*")
+        related_files = glob.glob(f"{glob.escape(folder)}/{glob.escape(name)}*")
         if not related_files:
             raise FileNotFoundError(f"No files found matching '{folder}/{name}*'")
         for file in related_files:

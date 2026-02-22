@@ -70,7 +70,7 @@ REPORT_STRUCTURE: |
 
 ### 2. `retriever_config.yaml` (Example)
 
-This file configures the behavior of the local RAG retriever. Create it in the root directory.
+This file configures the behavior of the local RAG retriever, vector search, and text navigator. Create it in the root directory.
 
 ```yaml
 # --- Example retriever_config.yaml ---
@@ -79,9 +79,14 @@ raw_file_path:
   - "/path/to/your/preprocessed_data/"
 split_chunk_size: 1500
 split_chunk_overlap: 250
-embedding_model: "BAAI/bge-m3" # Recommended embedding model
+embedding_model: "BAAI/bge-m3"          # Recommended embedding model
 top_k: 5
 hybrid_weight: [0.4, 0.6]
+
+# AgentDocumentReader settings
+navigator_top_k: 5                       # Top-k results for semantic/keyword search
+navigator_persist_dir: "navigator_tmp"   # Chroma cache directory (reused across sessions)
+reader_tmp_dir: "reader_tmp"             # Preprocessed JSON output directory
 ```
 
 ### 3. `.env`
@@ -151,6 +156,65 @@ python preprocess_files.py DATA_DIR OUTPUT_DIR [--model deepseek/deepseek-chat] 
 This script processes PDF files and saves structured JSON output. Ensure the output directory is correctly specified under `raw_file_path` in your `retriever_config.yaml` so the RAG pipeline can find the data.
 
 ### 2. Run Report Generation
+
+#### Document QA Agent (`subagent/document_qa.py`)
+
+A ReAct-loop agent that answers questions against pre-processed JSON documents using `AgentDocumentReader`.
+
+**Entry points:**
+
+```python
+from subagent.document_qa import run_document_qa, run_document_qa_async
+
+# Synchronous
+answer = run_document_qa(
+    file_paths=[{"name": "Annual Report 2024", "path": "/path/to/doc.json"}],
+    question="What was the net profit in Q3?",
+    budget=50,  # max LLM calls
+)
+
+# Async (non-blocking, runs in asyncio.to_thread)
+answer = await run_document_qa_async(file_paths=[...], question="...", budget=50)
+```
+
+**`file_paths` format:** list of `{"name": str, "path": str}` dicts. `path` must point to a `.json` file produced by `PDFDocumentPreprocessor`.
+
+**Dual circuit breakers** (prevent infinite loops):
+- `consecutive_errors >= 3`: three back-to-back LLM failures → triggers forced answer submission
+- `consecutive_text_only >= 3`: three planning-only responses with no tool calls → triggers forced answer submission
+
+**Graceful degradation:**
+- `force_answer_node` returns a Chinese fallback answer on LLM failure instead of raising
+- `extract_answer_node` returns `"[Unable to extract answer from documents]"` sentinel on empty content
+
+**Resource cleanup:** `AgentDocumentReader` is always closed in a `finally` block regardless of graph success or failure.
+
+---
+
+#### AgentDocumentReader / Text Navigator (`Tools/text_navigator.py`)
+
+Long-lived reader that provides page navigation, semantic search, keyword search, and bookmarks over pre-processed JSON documents.
+
+**Key constraints:**
+- `open_document(path)` only accepts `.json` files (output of `PDFDocumentPreprocessor`). Passing other file types raises `ValueError`.
+- Documents are indexed with Chroma + BM25. The Chroma SQLite cache is stored in `navigator_tmp/{doc_name}/` and **reused across sessions** — no re-embedding if the page count matches.
+
+**`get_metadata()` return shape:**
+
+```python
+{
+    "name": str,        # document name
+    "date": str,        # document date
+    "char_count": int,  # total character count via len() — accurate for CJK text
+    "has_outline": bool,
+}
+```
+
+Note: `char_count` uses `len()` (character count) rather than `.split()` (word count), which is accurate for Chinese/Japanese/Korean text without whitespace delimiters.
+
+**Bookmarks:** persist across `open_document()` calls (unlike page position, which resets to 0 on each open).
+
+---
 
 #### Deep Report (`report_writer.py`)
 

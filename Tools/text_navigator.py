@@ -1,4 +1,3 @@
-import contextlib
 import json
 import logging
 import os
@@ -19,7 +18,8 @@ _PROJECT_ROOT = pathlib.Path(__file__).parent.parent
 _CONFIG_PATH = _PROJECT_ROOT / "retriever_config.yaml"
 _cfg = omegaconf.OmegaConf.load(_CONFIG_PATH)
 _DEFAULT_TOP_K: int = int(_cfg.get("navigator_top_k", 5))
-_DEFAULT_PERSIST_DIR: str = str(_PROJECT_ROOT / "navigator_tmp")
+_DEFAULT_PERSIST_DIR: str = str(_PROJECT_ROOT / str(_cfg.get("navigator_persist_dir", "navigator_tmp")))
+_DEFAULT_EMBEDDING_MODEL: str = str(_cfg.get("embedding_model", "Qwen/Qwen3-Embedding-0.6B"))
 
 logger = logging.getLogger("TextNavigator")
 logger.setLevel(logging.ERROR)
@@ -32,7 +32,7 @@ _embedding_model_name: str = ""
 _embedding_lock = threading.Lock()
 
 
-def get_embedding_model(model_name: str = "Qwen/Qwen3-Embedding-0.6B") -> HuggingFaceEmbeddings:
+def get_embedding_model(model_name: str = _DEFAULT_EMBEDDING_MODEL) -> HuggingFaceEmbeddings:
     global _embedding_model, _embedding_model_name
     if _embedding_model is not None and _embedding_model_name == model_name:
         return _embedding_model
@@ -76,7 +76,7 @@ class AgentDocumentReader:
     def __init__(
         self,
         persist_dir: str = _DEFAULT_PERSIST_DIR,
-        embedding_model_name: str = "Qwen/Qwen3-Embedding-0.6B",
+        embedding_model_name: str = _DEFAULT_EMBEDDING_MODEL,
     ):
         self._persist_dir = persist_dir
         self._embedding_model_name = embedding_model_name
@@ -99,6 +99,10 @@ class AgentDocumentReader:
         Returns a status summary string. If *path* is already open, returns current
         state without reloading (dedup check).
         """
+        # Validate: only accept pre-processed .json files
+        if not path.endswith(".json"):
+            raise ValueError(f"open_document only accepts .json files, got: {path!r}")
+
         # Dedup: skip reload if same document is already open
         if self._current_path == path and self._document is not None:
             return (
@@ -116,10 +120,8 @@ class AgentDocumentReader:
         else:
             doc = BaseReaderDocument(**raw)
 
-        # Cleanup previous vectorstore before building new one
-        if self._vectorstore is not None:
-            with contextlib.suppress(Exception):
-                self._vectorstore.delete_collection()
+        # Release the previous vectorstore reference (SQLite cache on disk is preserved for reuse)
+        self._vectorstore = None
 
         # Build vectorstore + BM25 before committing state so a failure
         # doesn't leave the reader in a half-initialised state.
@@ -133,16 +135,31 @@ class AgentDocumentReader:
                     persist_directory=persist_path,
                     embedding_function=embeddings,
                 )
-                # Validate cache: rebuild if page count changed
-                cached_count = vectorstore._collection.count()
-                if cached_count != len(doc.pages):
-                    logger.warning(
-                        "Chroma cache stale (%d vs %d pages), rebuilding",
-                        cached_count,
-                        len(doc.pages),
-                    )
+                # Validate cache: rebuild if page count changed or private API unavailable
+                needs_rebuild = False
+                try:
+                    cached_count = vectorstore._collection.count()
+                    if cached_count != len(doc.pages):
+                        logger.warning(
+                            "Chroma cache stale (%d vs %d pages), rebuilding",
+                            cached_count,
+                            len(doc.pages),
+                        )
+                        needs_rebuild = True
+                except (AttributeError, Exception) as e:
+                    logger.warning("Chroma _collection.count() unavailable (%s); rebuilding from scratch", e)
+                    needs_rebuild = True
+                if needs_rebuild:
                     import shutil
 
+                    from chromadb.api.client import SharedSystemClient
+
+                    # Release the stale vectorstore reference and clear chromadb's
+                    # internal client registry before deleting files on disk.
+                    # This prevents "readonly database" errors when recreating the
+                    # store at the same path in a long-running process.
+                    vectorstore = None
+                    SharedSystemClient.clear_system_cache()
                     shutil.rmtree(persist_path)
                     vectorstore = Chroma.from_documents(
                         documents=doc.pages,
@@ -175,12 +192,9 @@ class AgentDocumentReader:
         return f"Opened: {doc.name} | date: {doc.date} | {len(doc.pages)} pages"
 
     def close_document(self) -> None:
-        """Clear all state and free resources."""
-        if self._vectorstore is not None:
-            with contextlib.suppress(Exception):
-                self._vectorstore.delete_collection()
+        """Clear all state and release resources. SQLite cache on disk is preserved for reuse."""
         self._document = None
-        self._vectorstore = None
+        self._vectorstore = None  # release reference; chromadb singleton keeps SQLite connection alive for cache
         self._bm25 = None
         self._current_page = 0
         self._current_path = None
@@ -200,11 +214,11 @@ class AgentDocumentReader:
     def get_metadata(self) -> dict:
         self._require_open()
         doc = self._document
-        word_count = sum(len(p.page_content.split()) for p in doc.pages)
+        char_count = sum(len(p.page_content) for p in doc.pages)
         return {
             "name": doc.name,
             "date": doc.date,
-            "word_count": word_count,
+            "char_count": char_count,
             "has_outline": bool(doc.outlines),
         }
 
@@ -388,7 +402,7 @@ class AgentDocumentReader:
             """Return document metadata as a JSON string.
 
             Input:  none.
-            Output: JSON with keys: name (str), date (str), word_count (int), has_outline (bool).
+            Output: JSON with keys: name (str), date (str), char_count (int), has_outline (bool).
 
             Agent Instruction:
             - Call right after open_document to confirm the report date and size before committing

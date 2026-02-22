@@ -124,7 +124,19 @@ def agent_node(state: DocumentQAState, config: RunnableConfig):
     text_preview = text[:150].replace("\n", " ") if text else "(empty)"
     logger.info("[agent] Iteration %d/%d — tools=%s, text=%s", iteration, budget, tool_names, text_preview)
 
-    return {"messages": [response], "iteration": iteration, "consecutive_errors": consecutive_errors}
+    # Track consecutive text-only (no tool calls) responses for degenerate loop detection
+    consecutive_text_only = state.get("consecutive_text_only", 0)
+    if tool_calls:
+        consecutive_text_only = 0
+    else:
+        consecutive_text_only += 1
+
+    return {
+        "messages": [response],
+        "iteration": iteration,
+        "consecutive_errors": consecutive_errors,
+        "consecutive_text_only": consecutive_text_only,
+    }
 
 
 def extract_answer_node(state: DocumentQAState):
@@ -148,9 +160,8 @@ def extract_answer_node(state: DocumentQAState):
         if answer:
             logger.warning("[extract_answer] No submit_answer found, using text fallback (%d chars)", len(answer))
         else:
-            raise RuntimeError(
-                "Failed to extract any answer — both submit_answer and text fallback produced empty results"
-            )
+            logger.error("[extract_answer] All extraction paths produced empty content; returning sentinel")
+            answer = "[Unable to extract answer from documents]"
     return {"answer": answer, "messages": tool_messages}
 
 
@@ -172,8 +183,14 @@ def force_answer_node(state: DocumentQAState):
     try:
         response = call_llm(MODEL_NAME, BACKUP_MODEL_NAME, messages, tool=[submit_answer], tool_choice="required")
     except Exception as e:
-        logger.error("[force_answer] LLM call failed: %s", e)
-        raise RuntimeError(f"Force answer LLM call failed after budget exhaustion: {e}") from e
+        logger.error("[force_answer] LLM call failed: %s; returning degraded answer", e)
+        fallback_answer = "[系統無法產生完整答案：LLM呼叫失敗。請參考對話記錄中已收集的資訊。]"
+        synthetic_msg = AIMessage(
+            content="",
+            tool_calls=[{"name": "submit_answer", "args": {"answer": fallback_answer}, "id": "force_answer_fallback"}],
+        )
+        return {"messages": [synthetic_msg]}
+
     logger.info(
         "[force_answer] LLM responded, tool_calls=%s", [tc["name"] for tc in getattr(response, "tool_calls", [])]
     )
@@ -210,7 +227,13 @@ def route_response(state: DocumentQAState) -> str:
         logger.info("[route] Tool calls %s → tools", tool_names)
         return "tools"
 
-    # 5. No tool calls (text-only planning) → loop back to agent
+    # 5. No tool calls (text-only planning) — check for degenerate loop
+    if state.get("consecutive_text_only", 0) >= 3:
+        logger.warning(
+            "[route] %d consecutive text-only responses → force_answer", state.get("consecutive_text_only", 0)
+        )
+        return "force_answer"
+
     logger.info("[route] No tool calls (planning) → agent")
     return "agent"
 
@@ -254,6 +277,43 @@ def build_document_qa_graph(tools: list):
 
 
 # ---------------------------------------------------------------------------
+# Shared session setup (C2/I9)
+# ---------------------------------------------------------------------------
+def _prepare_qa_session(
+    file_paths: list[dict],
+    question: str,
+    budget: int,
+) -> tuple:
+    """Create navigator, graph, initial state, and invoke config for a QA session.
+
+    Returns:
+        (navigator, graph, initial_state, invoke_config)
+    """
+    navigator = AgentDocumentReader()
+    all_tools = navigator.get_tools() + [submit_answer]
+
+    doc_list = "\n".join(f"- name: {fp['name']}\n  path: {fp['path']}" for fp in file_paths)
+    system_prompt = DOCUMENT_QA_SYSTEM_PROMPT.format(budget=budget, doc_list=doc_list)
+
+    graph = build_document_qa_graph(all_tools)
+
+    initial_state = {
+        "messages": [SystemMessage(content=system_prompt), HumanMessage(content=question)],
+        "file_paths": file_paths,
+        "question": question,
+        "budget": budget,
+        "iteration": 0,
+        "answer": "",
+        "consecutive_errors": 0,
+        "consecutive_text_only": 0,
+    }
+
+    invoke_config = {"configurable": {"tools": all_tools}}
+
+    return navigator, graph, initial_state, invoke_config
+
+
+# ---------------------------------------------------------------------------
 # Convenience entry points
 # ---------------------------------------------------------------------------
 def _validate_inputs(file_paths: list[dict], question: str, budget: int) -> None:
@@ -285,29 +345,12 @@ def run_document_qa(
         The answer string.
     """
     _validate_inputs(file_paths, question, budget)
-    navigator = AgentDocumentReader()
-    all_tools = navigator.get_tools() + [submit_answer]
-
-    doc_list = "\n".join(f"- name: {fp['name']}\n  path: {fp['path']}" for fp in file_paths)
-    system_prompt = DOCUMENT_QA_SYSTEM_PROMPT.format(budget=budget, doc_list=doc_list)
-
-    graph = build_document_qa_graph(all_tools)
+    navigator, graph, initial_state, invoke_config = _prepare_qa_session(file_paths, question, budget)
 
     try:
-        result = graph.invoke(
-            {
-                "messages": [SystemMessage(content=system_prompt), HumanMessage(content=question)],
-                "file_paths": file_paths,
-                "question": question,
-                "budget": budget,
-                "iteration": 0,
-                "answer": "",
-                "consecutive_errors": 0,
-            },
-            config={"configurable": {"tools": all_tools}},
-        )
-    except RuntimeError as e:
-        raise RuntimeError(f"Document QA failed: {e}") from e
+        result = graph.invoke(initial_state, config=invoke_config)
+    finally:
+        navigator.close_document()
 
     answer = result["answer"]
     if not answer or not answer.strip():
@@ -331,32 +374,117 @@ async def run_document_qa_async(
         The answer string.
     """
     _validate_inputs(file_paths, question, budget)
-    navigator = AgentDocumentReader()
-    all_tools = navigator.get_tools() + [submit_answer]
-
-    doc_list = "\n".join(f"- name: {fp['name']}\n  path: {fp['path']}" for fp in file_paths)
-    system_prompt = DOCUMENT_QA_SYSTEM_PROMPT.format(budget=budget, doc_list=doc_list)
-
-    graph = build_document_qa_graph(all_tools)
+    navigator, graph, initial_state, invoke_config = _prepare_qa_session(file_paths, question, budget)
 
     try:
-        result = await asyncio.to_thread(
-            graph.invoke,
-            {
-                "messages": [SystemMessage(content=system_prompt), HumanMessage(content=question)],
-                "file_paths": file_paths,
-                "question": question,
-                "budget": budget,
-                "iteration": 0,
-                "answer": "",
-                "consecutive_errors": 0,
-            },
-            {"configurable": {"tools": all_tools}},
-        )
-    except RuntimeError as e:
-        raise RuntimeError(f"Document QA failed: {e}") from e
+        result = await asyncio.to_thread(graph.invoke, initial_state, invoke_config)
+    finally:
+        navigator.close_document()
 
     answer = result["answer"]
     if not answer or not answer.strip():
         raise RuntimeError("Document QA completed but produced an empty answer")
     return answer
+
+
+# ---------------------------------------------------------------------------
+# Interactive test runner
+# Usage:  cd /root/pdf_parser && python -m subagent.document_qa
+#         cd /root/pdf_parser && python subagent/document_qa.py
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import glob as _glob
+    import os
+    import sys
+    import time
+
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
+    # Verbose logging so iteration progress is visible in the terminal
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(name)-14s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    logging.getLogger("DocumentQA").setLevel(logging.INFO)
+    logging.getLogger("TextNavigator").setLevel(logging.WARNING)
+
+    from Tools.document_preprocessors import PDFDocumentPreprocessor
+
+    _ROOT = pathlib.Path(__file__).parent.parent
+    RAW_MD = str(_ROOT / "raw_md")
+    W = 72
+
+    # ── Step 1: preprocess all raw_md docs (uses reader_tmp cache) ──────────
+    print(f"\n{'─' * W}\n  Preprocessing documents (cached in reader_tmp/)\n{'─' * W}")
+    preprocessor = PDFDocumentPreprocessor(chunk_size=1000, chunk_overlap=150)
+    doc_paths: dict[str, str] = {}
+    for json_file in sorted(_glob.glob(f"{RAW_MD}/*.json")):
+        if "_table_" in json_file:
+            continue
+        name = os.path.splitext(os.path.basename(json_file))[0]
+        _, path = preprocessor.preprocess(RAW_MD, name)
+        doc_paths[name] = path
+        print(f"  ok  {name[:70]}")
+
+    if not doc_paths:
+        print(f"  No .json files found in {RAW_MD}")
+        sys.exit(1)
+
+    # ── Step 2: select documents ─────────────────────────────────────────────
+    names = sorted(doc_paths.keys())
+    print(f"\n{'─' * W}\n  Available documents\n{'─' * W}")
+    for i, name in enumerate(names, 1):
+        print(f"  {i:2d}.  {name[:70]}")
+
+    print("\n  Select docs (e.g. '1,3' | 'all') [all]: ", end="", flush=True)
+    raw_sel = input().strip()
+    if not raw_sel or raw_sel.lower() == "all":
+        selected_pairs = [(n, doc_paths[n]) for n in names]
+    else:
+        idxs = [int(x) - 1 for x in raw_sel.replace(",", " ").split() if x.strip().isdigit()]
+        selected_pairs = [(names[i], doc_paths[names[i]]) for i in idxs if 0 <= i < len(names)]
+
+    if not selected_pairs:
+        print("  No documents selected.")
+        sys.exit(1)
+
+    print(f"  Using {len(selected_pairs)} doc(s):")
+    for n, _ in selected_pairs:
+        print(f"    * {n[:70]}")
+
+    # ── Step 3: enter question ────────────────────────────────────────────────
+    print(f"\n{'─' * W}\n  Question\n{'─' * W}")
+    print("  > ", end="", flush=True)
+    question = input().strip()
+    if not question:
+        print("  No question entered.")
+        sys.exit(1)
+
+    # ── Step 4: budget ────────────────────────────────────────────────────────
+    print("  Budget (iterations) [50]: ", end="", flush=True)
+    raw_budget = input().strip()
+    budget = int(raw_budget) if raw_budget.isdigit() and int(raw_budget) > 0 else 50
+
+    # ── Step 5: run ───────────────────────────────────────────────────────────
+    file_paths = [{"name": n, "path": p} for n, p in selected_pairs]
+    print(f"\n{'=' * W}")
+    print(f"  Q: {question[:68]}")
+    print(f"  Docs: {len(file_paths)} | Budget: {budget}")
+    print(f"{'=' * W}\n")
+
+    t0 = time.time()
+    try:
+        answer = run_document_qa(file_paths, question, budget=budget)
+        elapsed = time.time() - t0
+        print(f"\n{'=' * W}")
+        print(f"  ANSWER  ({elapsed:.1f}s)")
+        print(f"{'=' * W}")
+        print(answer)
+        print(f"{'=' * W}\n")
+    except Exception as exc:
+        elapsed = time.time() - t0
+        print(f"\n  ERROR after {elapsed:.1f}s: {exc}")
+        sys.exit(1)

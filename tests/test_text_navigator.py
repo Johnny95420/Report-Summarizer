@@ -11,7 +11,26 @@ import pytest
 from langchain_core.documents import Document
 
 from Tools.reader_models import BaseReaderDocument, PDFReaderDocument
-from Tools.text_navigator import AgentDocumentReader, Bookmark
+from Tools.text_navigator import _DEFAULT_PERSIST_DIR, AgentDocumentReader, Bookmark
+
+
+# ---------------------------------------------------------------------------
+# Config loading: _DEFAULT_PERSIST_DIR reads from retriever_config.yaml
+# ---------------------------------------------------------------------------
+class TestConfigLoading:
+    def test_default_persist_dir_is_string(self):
+        """_DEFAULT_PERSIST_DIR must be a non-empty string."""
+        assert isinstance(_DEFAULT_PERSIST_DIR, str)
+        assert _DEFAULT_PERSIST_DIR
+
+    def test_default_persist_dir_contains_navigator_tmp(self):
+        """_DEFAULT_PERSIST_DIR should contain the config value 'navigator_tmp' (from FAKE_CONFIG)."""
+        assert "navigator_tmp" in _DEFAULT_PERSIST_DIR
+
+    def test_default_persist_dir_is_absolute_path(self):
+        """_DEFAULT_PERSIST_DIR should be an absolute path (anchored to project root)."""
+        import os
+        assert os.path.isabs(_DEFAULT_PERSIST_DIR)
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +338,7 @@ class TestChromaCacheValidation:
             patch("Tools.text_navigator.BM25Retriever") as mock_bm25,
             patch("os.path.exists", side_effect=lambda p: p == path or "nav_store" in str(p)),
             patch("shutil.rmtree") as mock_rmtree,
+            patch("chromadb.api.client.SharedSystemClient.clear_system_cache") as mock_clear,
         ):
             mock_chroma.return_value = fake_vectorstore
             mock_chroma.from_documents.return_value = MagicMock()
@@ -326,9 +346,45 @@ class TestChromaCacheValidation:
 
             reader.open_document(path)
 
-            # Should have rebuilt: rmtree called, then from_documents
+            # Should have rebuilt: clear_system_cache → rmtree → from_documents
+            mock_clear.assert_called_once()
             mock_rmtree.assert_called_once()
             mock_chroma.from_documents.assert_called_once()
+
+    def test_stale_cache_clears_system_cache_before_rmtree(self, reader, tmp_path):
+        """clear_system_cache must be called before shutil.rmtree on stale rebuild."""
+        doc = _make_base_doc(num_pages=5)
+        path = _write_doc_json(tmp_path, doc)
+
+        fake_embeddings = MagicMock()
+        fake_collection = MagicMock()
+        fake_collection.count.return_value = 3  # stale
+
+        fake_vectorstore = MagicMock()
+        fake_vectorstore._collection = fake_collection
+
+        call_order = []
+
+        with (
+            patch("Tools.text_navigator.get_embedding_model", return_value=fake_embeddings),
+            patch("Tools.text_navigator.Chroma") as mock_chroma,
+            patch("Tools.text_navigator.BM25Retriever") as mock_bm25,
+            patch("os.path.exists", side_effect=lambda p: p == path or "nav_store" in str(p)),
+            patch("shutil.rmtree", side_effect=lambda *a, **kw: call_order.append("rmtree")),
+            patch(
+                "chromadb.api.client.SharedSystemClient.clear_system_cache",
+                side_effect=lambda: call_order.append("clear"),
+            ),
+        ):
+            mock_chroma.return_value = fake_vectorstore
+            mock_chroma.from_documents.return_value = MagicMock()
+            mock_bm25.from_documents.return_value = MagicMock()
+
+            reader.open_document(path)
+
+        assert call_order == ["clear", "rmtree"], (
+            f"Expected clear_system_cache before rmtree, got: {call_order}"
+        )
 
     def test_valid_cache_not_rebuilt(self, reader, tmp_path):
         """When Chroma cache count matches page count, no rebuild needed."""
@@ -361,8 +417,9 @@ class TestChromaCacheValidation:
 # Chroma cleanup on document switch (C7)
 # ---------------------------------------------------------------------------
 class TestChromaCleanup:
-    def test_vectorstore_cleaned_on_switch(self, reader, tmp_path, mock_indexing):
-        """Old vectorstore should be cleaned up when switching documents (C7 fix)."""
+    def test_vectorstore_reference_released_on_switch(self, reader, tmp_path, mock_indexing):
+        """Old vectorstore reference is released (set to None) when switching documents.
+        SQLite cache on disk is preserved — delete_collection() is NOT called."""
         doc_a = _make_base_doc(name="doc-A")
         doc_b = _make_base_doc(name="doc-B")
         path_a = _write_doc_json(tmp_path, doc_a, "a.json")
@@ -372,42 +429,20 @@ class TestChromaCleanup:
         old_vectorstore = reader._vectorstore
 
         reader.open_document(path_b)
-        old_vectorstore.delete_collection.assert_called_once()
+        # delete_collection must NOT be called — preserves disk cache
+        old_vectorstore.delete_collection.assert_not_called()
+        assert reader._vectorstore is not None  # new vectorstore assigned
 
-    def test_close_document_cleans_vectorstore(self, reader, tmp_path, mock_indexing):
-        """close_document should clean up vectorstore (C7 fix)."""
+    def test_close_document_releases_vectorstore(self, reader, tmp_path, mock_indexing):
+        """close_document sets _vectorstore to None without calling delete_collection."""
         doc = _make_base_doc()
         path = _write_doc_json(tmp_path, doc)
         reader.open_document(path)
         vectorstore = reader._vectorstore
 
         reader.close_document()
-        vectorstore.delete_collection.assert_called_once()
+        vectorstore.delete_collection.assert_not_called()
         assert reader._vectorstore is None
-
-    def test_close_document_suppresses_delete_error(self, reader, tmp_path, mock_indexing):
-        """delete_collection() raising must not propagate (contextlib.suppress)."""
-        doc = _make_base_doc()
-        path = _write_doc_json(tmp_path, doc)
-        reader.open_document(path)
-        reader._vectorstore.delete_collection.side_effect = RuntimeError("already deleted")
-
-        reader.close_document()  # must not raise
-        assert reader._vectorstore is None
-
-    def test_switch_document_suppresses_delete_error(self, reader, tmp_path, mock_indexing):
-        """delete_collection() error on switch must not propagate."""
-        doc_a = _make_base_doc(name="doc-A")
-        doc_b = _make_base_doc(name="doc-B")
-        path_a = _write_doc_json(tmp_path, doc_a, "a.json")
-        path_b = _write_doc_json(tmp_path, doc_b, "b.json")
-
-        reader.open_document(path_a)
-        reader._vectorstore.delete_collection.side_effect = RuntimeError("broken")
-
-        # Switch should succeed despite cleanup error
-        result = reader.open_document(path_b)
-        assert "doc-B" in result
 
 
 # ---------------------------------------------------------------------------
@@ -433,3 +468,127 @@ class TestGetEmbeddingModelErrors:
         finally:
             tn._embedding_model = old_model
             tn._embedding_model_name = old_name
+
+
+# ---------------------------------------------------------------------------
+# Path validation (C5)
+# ---------------------------------------------------------------------------
+class TestPathValidation:
+    def test_rejects_non_json_path(self, reader):
+        """open_document should reject paths not ending in .json (C5 fix)."""
+        with pytest.raises(ValueError, match=r"\.json"):
+            reader.open_document("/etc/passwd")
+
+    def test_rejects_txt_path(self, reader):
+        """open_document should reject .txt paths (C5 fix)."""
+        with pytest.raises(ValueError, match=r"\.json"):
+            reader.open_document("/tmp/doc.txt")
+
+    def test_rejects_path_without_extension(self, reader):
+        """open_document should reject paths with no extension (C5 fix)."""
+        with pytest.raises(ValueError, match=r"\.json"):
+            reader.open_document("/tmp/doc")
+
+    def test_accepts_json_path(self, reader, tmp_path, mock_indexing):
+        """open_document should accept .json paths (C5 fix)."""
+        doc = _make_base_doc()
+        path = _write_doc_json(tmp_path, doc)
+        result = reader.open_document(path)
+        assert "test-doc" in result
+
+
+# ---------------------------------------------------------------------------
+# Chroma _collection.count() failure triggers rebuild (C7)
+# ---------------------------------------------------------------------------
+class TestChromaCountFailure:
+    def test_attribute_error_triggers_rebuild(self, reader, tmp_path):
+        """When _collection.count() raises AttributeError, should rebuild (C7 fix)."""
+        doc = _make_base_doc(num_pages=3)
+        path = _write_doc_json(tmp_path, doc)
+
+        fake_embeddings = MagicMock()
+        fake_collection = MagicMock()
+        fake_collection.count.side_effect = AttributeError("no _collection attr")
+
+        fake_vectorstore = MagicMock()
+        fake_vectorstore._collection = fake_collection
+
+        with (
+            patch("Tools.text_navigator.get_embedding_model", return_value=fake_embeddings),
+            patch("Tools.text_navigator.Chroma") as mock_chroma,
+            patch("Tools.text_navigator.BM25Retriever") as mock_bm25,
+            patch("os.path.exists", side_effect=lambda p: p == path or "nav_store" in str(p)),
+            patch("shutil.rmtree") as mock_rmtree,
+        ):
+            mock_chroma.return_value = fake_vectorstore
+            mock_chroma.from_documents.return_value = MagicMock()
+            mock_bm25.from_documents.return_value = MagicMock()
+
+            reader.open_document(path)
+
+            mock_rmtree.assert_called_once()
+            mock_chroma.from_documents.assert_called_once()
+
+    def test_generic_exception_triggers_rebuild(self, reader, tmp_path):
+        """When _collection.count() raises any exception, should rebuild (C7 fix)."""
+        doc = _make_base_doc(num_pages=3)
+        path = _write_doc_json(tmp_path, doc)
+
+        fake_embeddings = MagicMock()
+        fake_collection = MagicMock()
+        fake_collection.count.side_effect = RuntimeError("Chroma internal error")
+
+        fake_vectorstore = MagicMock()
+        fake_vectorstore._collection = fake_collection
+
+        with (
+            patch("Tools.text_navigator.get_embedding_model", return_value=fake_embeddings),
+            patch("Tools.text_navigator.Chroma") as mock_chroma,
+            patch("Tools.text_navigator.BM25Retriever") as mock_bm25,
+            patch("os.path.exists", side_effect=lambda p: p == path or "nav_store" in str(p)),
+            patch("shutil.rmtree") as mock_rmtree,
+        ):
+            mock_chroma.return_value = fake_vectorstore
+            mock_chroma.from_documents.return_value = MagicMock()
+            mock_bm25.from_documents.return_value = MagicMock()
+
+            reader.open_document(path)
+
+            mock_rmtree.assert_called_once()
+            mock_chroma.from_documents.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# char_count in get_metadata (I5)
+# ---------------------------------------------------------------------------
+class TestCharCount:
+    def test_get_metadata_has_char_count(self, reader, tmp_path, mock_indexing):
+        """get_metadata should return char_count not word_count (I5 fix)."""
+        doc = _make_base_doc()
+        path = _write_doc_json(tmp_path, doc)
+        reader.open_document(path)
+
+        metadata = reader.get_metadata()
+        assert "char_count" in metadata
+        assert "word_count" not in metadata
+        expected = sum(len(p.page_content) for p in doc.pages)
+        assert metadata["char_count"] == expected
+
+    def test_char_count_for_cjk_content(self, reader, tmp_path, mock_indexing):
+        """char_count should correctly count CJK characters (I5 fix)."""
+        pages = [
+            Document(page_content="台積電2024年資本支出", metadata={"page_id": 0}),
+            Document(page_content="預計約300億美元", metadata={"page_id": 1}),
+        ]
+        doc = MagicMock()
+        doc.date = "2024-01-01"
+        doc.name = "test"
+        doc.outlines = []
+        doc.pages = pages
+
+        # Inject mocked document directly
+        reader._document = doc
+        reader._current_path = "/fake/path.json"
+
+        metadata = reader.get_metadata()
+        assert metadata["char_count"] == len("台積電2024年資本支出") + len("預計約300億美元")

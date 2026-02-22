@@ -36,6 +36,8 @@ FAKE_CONFIG = {
     # retriever config (raw_file_path=None skips data loading)
     "raw_file_path": None,
     "navigator_top_k": 5,
+    "navigator_persist_dir": "navigator_tmp",
+    "reader_tmp_dir": "reader_tmp",
 }
 
 
