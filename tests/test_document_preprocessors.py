@@ -23,6 +23,7 @@ class TestConfigLoading:
     def test_default_reader_tmp_is_absolute_path(self):
         """_DEFAULT_READER_TMP should be an absolute path (anchored to project root)."""
         import os
+
         assert os.path.isabs(_DEFAULT_READER_TMP)
 
 
@@ -54,18 +55,18 @@ class TestOutlineHeaderTruncation:
         outlines = self.preprocessor._build_outlines([doc])
         assert outlines[0]["headers"][0]["title"] == "A" * 50 + "...[truncated]"
 
-    def test_short_title_gets_suffix_unconditionally(self):
-        """Suffix '...[truncated]' is always appended, even for short titles."""
+    def test_short_title_no_suffix(self):
+        """Short titles (≤ 50 chars) must NOT get the '...[truncated]' suffix."""
         doc = self._make_doc("# Short title")
         outlines = self.preprocessor._build_outlines([doc])
-        assert outlines[0]["headers"][0]["title"] == "Short title...[truncated]"
+        assert outlines[0]["headers"][0]["title"] == "Short title"
 
     def test_exactly_50_char_title(self):
-        """Title of exactly 50 chars: all 50 chars kept + suffix."""
+        """Title of exactly 50 chars: all 50 chars kept, no suffix."""
         title = "B" * 50
         doc = self._make_doc(f"# {title}")
         outlines = self.preprocessor._build_outlines([doc])
-        assert outlines[0]["headers"][0]["title"] == "B" * 50 + "...[truncated]"
+        assert outlines[0]["headers"][0]["title"] == "B" * 50
 
     def test_long_title_total_length(self):
         """For a 60-char title, result length = 50 + len('...[truncated]') = 64."""

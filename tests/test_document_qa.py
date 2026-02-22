@@ -1,5 +1,6 @@
 """Tests for subagent.document_qa — route_response, extract_answer_node, _build_iteration_reminder."""
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +15,7 @@ from subagent.document_qa import (
     force_answer_node,
     route_response,
     run_document_qa,
+    run_document_qa_async,
 )
 
 
@@ -182,7 +184,7 @@ class TestBuildIterationReminder:
 # ---------------------------------------------------------------------------
 class TestValidateInputs:
     def test_valid(self):
-        _validate_inputs([{"name": "a", "path": "/a"}], "question?", 10)
+        _validate_inputs([{"name": "a", "path": "/a.json"}], "question?", 10)
 
     def test_empty_file_paths(self):
         with pytest.raises(ValueError, match="non-empty"):
@@ -194,19 +196,29 @@ class TestValidateInputs:
 
     def test_empty_question(self):
         with pytest.raises(ValueError, match="non-empty string"):
-            _validate_inputs([{"name": "a", "path": "/a"}], "", 10)
+            _validate_inputs([{"name": "a", "path": "/a.json"}], "", 10)
 
     def test_zero_budget(self):
         with pytest.raises(ValueError, match="budget must be > 0"):
-            _validate_inputs([{"name": "a", "path": "/a"}], "question?", 0)
+            _validate_inputs([{"name": "a", "path": "/a.json"}], "question?", 0)
 
     def test_whitespace_only_question(self):
         with pytest.raises(ValueError, match="non-empty string"):
-            _validate_inputs([{"name": "a", "path": "/a"}], "   ", 10)
+            _validate_inputs([{"name": "a", "path": "/a.json"}], "   ", 10)
 
     def test_missing_name_key(self):
         with pytest.raises(ValueError, match="'name' and 'path'"):
-            _validate_inputs([{"path": "/a"}], "question?", 10)
+            _validate_inputs([{"path": "/a.json"}], "question?", 10)
+
+    def test_non_json_path_raises(self):
+        """FileReference validator rejects paths not ending in .json."""
+        with pytest.raises(ValueError, match="'name' and 'path'"):
+            _validate_inputs([{"name": "a", "path": "/a.txt"}], "question?", 10)
+
+    def test_empty_name_raises(self):
+        """FileReference validator rejects empty or whitespace-only names."""
+        with pytest.raises(ValueError, match="'name' and 'path'"):
+            _validate_inputs([{"name": "  ", "path": "/a.json"}], "question?", 10)
 
 
 # ---------------------------------------------------------------------------
@@ -267,54 +279,58 @@ class TestForceAnswerNode:
             result = force_answer_node(state)
         assert len(result["messages"]) == 1
 
+    def test_logs_trigger_reason_budget_exhausted(self, caplog):
+        """force_answer_node logs 'budget exhausted' when iteration >= budget."""
+        import logging
+
+        state = _make_state(AIMessage(content=""), iteration=50, budget=50)
+        state["consecutive_errors"] = 0
+        state["consecutive_text_only"] = 0
+        mock_response = AIMessage(content="ans")
+        mock_response.tool_calls = [{"name": "submit_answer", "args": {"answer": "ans"}, "id": "1"}]
+        with caplog.at_level(logging.ERROR, logger="DocumentQA"):
+            with patch("subagent.document_qa.call_llm", return_value=mock_response):
+                force_answer_node(state)
+        assert "budget exhausted" in caplog.text
+
+    def test_logs_trigger_reason_consecutive_errors(self, caplog):
+        """force_answer_node logs 'consecutive_errors' when error threshold is reached."""
+        import logging
+
+        state = _make_state(AIMessage(content=""), iteration=5, budget=50)
+        state["consecutive_errors"] = 3
+        state["consecutive_text_only"] = 0
+        mock_response = AIMessage(content="ans")
+        mock_response.tool_calls = [{"name": "submit_answer", "args": {"answer": "ans"}, "id": "1"}]
+        with caplog.at_level(logging.ERROR, logger="DocumentQA"):
+            with patch("subagent.document_qa.call_llm", return_value=mock_response):
+                force_answer_node(state)
+        assert "consecutive_errors=3" in caplog.text
+
+    def test_logs_trigger_reason_consecutive_text_only(self, caplog):
+        """force_answer_node logs 'consecutive_text_only' when text-only threshold is reached."""
+        import logging
+
+        state = _make_state(AIMessage(content=""), iteration=5, budget=50)
+        state["consecutive_errors"] = 0
+        state["consecutive_text_only"] = 3
+        mock_response = AIMessage(content="ans")
+        mock_response.tool_calls = [{"name": "submit_answer", "args": {"answer": "ans"}, "id": "1"}]
+        with caplog.at_level(logging.ERROR, logger="DocumentQA"):
+            with patch("subagent.document_qa.call_llm", return_value=mock_response):
+                force_answer_node(state)
+        assert "consecutive_text_only=3" in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # run_document_qa: answer validation and error propagation
 # ---------------------------------------------------------------------------
-class TestRunDocumentQA:
-    def test_graph_error_propagates(self):
-        """run_document_qa should propagate errors from graph.invoke."""
-        with (
-            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
-            patch("subagent.document_qa.AgentDocumentReader"),
-        ):
-            mock_graph = MagicMock()
-            mock_graph.invoke.side_effect = RuntimeError("graph crash")
-            mock_build.return_value = mock_graph
-            with pytest.raises(RuntimeError, match="graph crash"):
-                run_document_qa([{"name": "a", "path": "/a"}], "question?", 10)
-
-    def test_raises_on_empty_answer(self):
-        """run_document_qa should raise RuntimeError when answer is whitespace-only."""
-        with (
-            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
-            patch("subagent.document_qa.AgentDocumentReader"),
-        ):
-            mock_graph = MagicMock()
-            mock_graph.invoke.return_value = {"answer": "   "}
-            mock_build.return_value = mock_graph
-            with pytest.raises(RuntimeError, match="empty answer"):
-                run_document_qa([{"name": "a", "path": "/a"}], "question?", 10)
-
-    def test_returns_valid_answer(self):
-        """run_document_qa should return the answer when it's valid."""
-        with (
-            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
-            patch("subagent.document_qa.AgentDocumentReader"),
-        ):
-            mock_graph = MagicMock()
-            mock_graph.invoke.return_value = {"answer": "Valid answer here"}
-            mock_build.return_value = mock_graph
-            result = run_document_qa([{"name": "a", "path": "/a"}], "question?", 10)
-        assert result == "Valid answer here"
-
-
 # ---------------------------------------------------------------------------
-# run_document_qa: navigator cleanup (C2)
+# run_document_qa: navigator cleanup
 # ---------------------------------------------------------------------------
 class TestRunDocumentQACleanup:
     def test_navigator_closed_on_success(self):
-        """run_document_qa should close navigator even on success (C2 fix)."""
+        """run_document_qa closes navigator in the finally block on success."""
         with (
             patch("subagent.document_qa.build_document_qa_graph") as mock_build,
             patch("subagent.document_qa.AgentDocumentReader") as mock_navigator_cls,
@@ -325,11 +341,11 @@ class TestRunDocumentQACleanup:
             mock_graph.invoke.return_value = {"answer": "Valid answer"}
             mock_build.return_value = mock_graph
 
-            run_document_qa([{"name": "a", "path": "/a"}], "question?", 10)
+            run_document_qa([{"name": "a", "path": "/a.json"}], "question?", 10)
             mock_navigator.close_document.assert_called_once()
 
     def test_navigator_closed_on_failure(self):
-        """run_document_qa should close navigator even when graph fails (C2 fix)."""
+        """run_document_qa closes navigator in the finally block even when graph fails."""
         with (
             patch("subagent.document_qa.build_document_qa_graph") as mock_build,
             patch("subagent.document_qa.AgentDocumentReader") as mock_navigator_cls,
@@ -341,8 +357,46 @@ class TestRunDocumentQACleanup:
             mock_build.return_value = mock_graph
 
             with pytest.raises(RuntimeError):
-                run_document_qa([{"name": "a", "path": "/a"}], "question?", 10)
+                run_document_qa([{"name": "a", "path": "/a.json"}], "question?", 10)
             mock_navigator.close_document.assert_called_once()
+
+
+class TestRunDocumentQA:
+    def test_graph_error_propagates(self):
+        """run_document_qa should propagate errors from graph.invoke."""
+        with (
+            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
+            patch("subagent.document_qa.AgentDocumentReader"),
+        ):
+            mock_graph = MagicMock()
+            mock_graph.invoke.side_effect = RuntimeError("graph crash")
+            mock_build.return_value = mock_graph
+            with pytest.raises(RuntimeError, match="graph crash"):
+                run_document_qa([{"name": "a", "path": "/a.json"}], "question?", 10)
+
+    def test_raises_on_empty_answer(self):
+        """run_document_qa should raise RuntimeError when answer is whitespace-only."""
+        with (
+            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
+            patch("subagent.document_qa.AgentDocumentReader"),
+        ):
+            mock_graph = MagicMock()
+            mock_graph.invoke.return_value = {"answer": "   "}
+            mock_build.return_value = mock_graph
+            with pytest.raises(RuntimeError, match="empty answer"):
+                run_document_qa([{"name": "a", "path": "/a.json"}], "question?", 10)
+
+    def test_returns_valid_answer(self):
+        """run_document_qa should return the answer when it's valid."""
+        with (
+            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
+            patch("subagent.document_qa.AgentDocumentReader"),
+        ):
+            mock_graph = MagicMock()
+            mock_graph.invoke.return_value = {"answer": "Valid answer here"}
+            mock_build.return_value = mock_graph
+            result = run_document_qa([{"name": "a", "path": "/a.json"}], "question?", 10)
+        assert result == "Valid answer here"
 
 
 # ---------------------------------------------------------------------------
@@ -403,8 +457,16 @@ class TestPrepareQASession:
 
     def test_initial_state_has_all_required_keys(self):
         _, _, initial_state, _ = self._call()
-        required = {"file_paths", "question", "answer", "iteration", "budget",
-                    "consecutive_errors", "consecutive_text_only", "messages"}
+        required = {
+            "file_paths",
+            "question",
+            "answer",
+            "iteration",
+            "budget",
+            "consecutive_errors",
+            "consecutive_text_only",
+            "messages",
+        }
         assert required.issubset(initial_state.keys())
 
     def test_consecutive_text_only_initialized_to_0(self):
@@ -436,3 +498,48 @@ class TestPrepareQASession:
         _, _, _, invoke_config = self._call()
         tool_names = [t.name for t in invoke_config["configurable"]["tools"]]
         assert "submit_answer" in tool_names
+
+
+# ---------------------------------------------------------------------------
+# run_document_qa_async: async wrapper tests
+# ---------------------------------------------------------------------------
+class TestRunDocumentQAAsync:
+    def test_returns_answer_normally(self):
+        """run_document_qa_async returns the answer string on the normal path."""
+        with (
+            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
+            patch("subagent.document_qa.AgentDocumentReader"),
+        ):
+            mock_graph = MagicMock()
+            mock_graph.invoke.return_value = {"answer": "async answer"}
+            mock_build.return_value = mock_graph
+            result = asyncio.run(run_document_qa_async([{"name": "a", "path": "/a.json"}], "question?", 10))
+        assert result == "async answer"
+
+    def test_exception_propagates(self):
+        """Exceptions from graph.invoke propagate out of the coroutine."""
+        with (
+            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
+            patch("subagent.document_qa.AgentDocumentReader"),
+        ):
+            mock_graph = MagicMock()
+            mock_graph.invoke.side_effect = RuntimeError("async crash")
+            mock_build.return_value = mock_graph
+            with pytest.raises(RuntimeError, match="async crash"):
+                asyncio.run(run_document_qa_async([{"name": "a", "path": "/a.json"}], "question?", 10))
+
+    def test_navigator_closed_in_finally(self):
+        """navigator.close_document() is called in the finally block even on exception."""
+        with (
+            patch("subagent.document_qa.build_document_qa_graph") as mock_build,
+            patch("subagent.document_qa.AgentDocumentReader") as mock_navigator_cls,
+        ):
+            mock_navigator = MagicMock()
+            mock_navigator_cls.return_value = mock_navigator
+            mock_graph = MagicMock()
+            mock_graph.invoke.side_effect = RuntimeError("crash in async")
+            mock_build.return_value = mock_graph
+
+            with pytest.raises(RuntimeError):
+                asyncio.run(run_document_qa_async([{"name": "a", "path": "/a.json"}], "question?", 10))
+            mock_navigator.close_document.assert_called_once()

@@ -3,9 +3,30 @@ import json
 import re
 
 from langchain_core.documents import Document
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|\s]+')
+
+
+class FileReference(BaseModel):
+    """A reference to a pre-processed document file."""
+
+    name: str
+    path: str
+
+    @field_validator("name")
+    @classmethod
+    def name_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name must be a non-empty string")
+        return v
+
+    @field_validator("path")
+    @classmethod
+    def path_must_be_json(cls, v: str) -> str:
+        if not v.endswith(".json"):
+            raise ValueError(f"path must point to a .json preprocessed file, got: {v!r}")
+        return v
 
 
 def sanitize_name(name: str) -> str:

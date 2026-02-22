@@ -27,26 +27,31 @@ logger.setLevel(logging.ERROR)
 # ---------------------------------------------------------------------------
 # Module-level embedding singleton (thread-safe)
 # ---------------------------------------------------------------------------
-_embedding_model: HuggingFaceEmbeddings | None = None
-_embedding_model_name: str = ""
+_embedding_state: tuple[str, HuggingFaceEmbeddings] | None = None
 _embedding_lock = threading.Lock()
 
 
 def get_embedding_model(model_name: str = _DEFAULT_EMBEDDING_MODEL) -> HuggingFaceEmbeddings:
-    global _embedding_model, _embedding_model_name
-    if _embedding_model is not None and _embedding_model_name == model_name:
-        return _embedding_model
+    global _embedding_state
+    state = _embedding_state
+    if state is not None and state[0] == model_name:
+        return state[1]
     with _embedding_lock:
         # Double-checked locking
-        if _embedding_model is None or _embedding_model_name != model_name:
+        state = _embedding_state
+        if state is None or state[0] != model_name:
             try:
-                _embedding_model = HuggingFaceEmbeddings(model_name=model_name)
+                new_model = HuggingFaceEmbeddings(model_name=model_name)
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to load embedding model '{model_name}': {e}. Check network, disk space, or model name."
                 ) from e
-            _embedding_model_name = model_name
-    return _embedding_model
+            # Publish name + model together so readers never observe a mixed pair.
+            _embedding_state = (model_name, new_model)
+            state = _embedding_state
+    if state is None:
+        raise RuntimeError("Embedding singleton state unavailable after initialisation.")
+    return state[1]
 
 
 # ---------------------------------------------------------------------------
@@ -109,23 +114,23 @@ class AgentDocumentReader:
                 f"[Already open: {self._document.name} | {len(self._document.pages)} pages | page {self._current_page}]"
             )
 
-        with open(path, encoding="utf-8") as f:
-            raw = json.load(f)
-
-        # Construct model from the parsed dict directly (single read)
-        raw["pages"] = [Document(**d) for d in raw["pages"]]
-        if "highlights" in raw and "tables" in raw:
-            raw["tables"] = [Document(**d) for d in raw["tables"]]
-            doc = PDFReaderDocument(**raw)
-        else:
-            doc = BaseReaderDocument(**raw)
-
         # Release the previous vectorstore reference (SQLite cache on disk is preserved for reuse)
         self._vectorstore = None
 
         # Build vectorstore + BM25 before committing state so a failure
         # doesn't leave the reader in a half-initialised state.
         try:
+            with open(path, encoding="utf-8") as f:
+                raw = json.load(f)
+
+            # Construct model from the parsed dict directly (single read)
+            raw["pages"] = [Document(**d) for d in raw["pages"]]
+            if "highlights" in raw and "tables" in raw:
+                raw["tables"] = [Document(**d) for d in raw["tables"]]
+                doc = PDFReaderDocument(**raw)
+            else:
+                doc = BaseReaderDocument(**raw)
+
             os.makedirs(self._persist_dir, exist_ok=True)
             persist_path = os.path.join(self._persist_dir, sanitize_name(doc.name))
 
@@ -179,6 +184,7 @@ class AgentDocumentReader:
             self._vectorstore = None
             self._bm25 = None
             self._current_path = None
+            logger.error("[open_document] Failed to open '%s': %s", path, e)
             raise RuntimeError(f"Failed to open '{path}': {e}") from e
 
         # Commit state only after successful init
@@ -192,13 +198,21 @@ class AgentDocumentReader:
         return f"Opened: {doc.name} | date: {doc.date} | {len(doc.pages)} pages"
 
     def close_document(self) -> None:
-        """Clear all state and release resources. SQLite cache on disk is preserved for reuse."""
+        """Release document resources to prevent memory leaks.
+
+        Clears the document, vectorstore, and BM25 references so the GC can
+        reclaim memory. Bookmarks are preserved — they persist for the lifetime
+        of this instance, just as they do across open_document() switches.
+        SQLite cache on disk is preserved for reuse on the next open_document() call.
+
+        Call this when the reader instance is no longer needed (e.g. in a
+        finally block around graph.invoke).
+        """
         self._document = None
         self._vectorstore = None  # release reference; chromadb singleton keeps SQLite connection alive for cache
         self._bm25 = None
         self._current_page = 0
         self._current_path = None
-        self._bookmarks = {}
 
     # ------------------------------------------------------------------
     # Status / metadata
@@ -358,7 +372,8 @@ class AgentDocumentReader:
         def open_document(path: str) -> str:
             """Load a pre-processed ReaderDocument JSON file and prepare it for reading.
 
-            Input:  path — absolute path to a JSON file inside reader_tmp/.
+            Input:  path — absolute path to a .json file produced by PDFDocumentPreprocessor
+                           (typically located in the reader_tmp/ directory).
             Output: summary string "Opened: <name> | date: <date> | <N> pages",
                     or "[Already open: ...]" if the same file is already loaded (no reload).
 
@@ -374,14 +389,13 @@ class AgentDocumentReader:
             - Calling with the same path that is already open is a no-op (returns current state).
 
             Args:
-                path: Absolute path to a ReaderDocument JSON file in reader_tmp/.
+                path: Absolute path to a .json file produced by PDFDocumentPreprocessor.
             """
             return _reader.open_document(path)
 
-        # close_document is intentionally excluded from agent tools — the agent
-        # should open_document to switch files (which resets state) rather than
-        # explicitly closing. The instance method close_document() remains
-        # available for internal / programmatic use.
+        # close_document is intentionally excluded from agent tools — agents
+        # switch documents via open_document(). close_document() is for
+        # programmatic use to release resources (call in a finally block).
 
         @tool
         def get_status() -> str:
@@ -425,7 +439,7 @@ class AgentDocumentReader:
             - Always call this before broad search or sequential navigation; use the outline to
               identify target sections, then jump directly with go_to_page instead of scanning
               page by page.
-            - Header titles are truncated (suffix "...[truncated]") — use go_to_page for full text.
+            - Header titles longer than 50 chars are truncated with "...[truncated]" suffix — use go_to_page for full text.
             - table_summary is a brief digest; use go_to_page to read the full table data.
             """
             return json.dumps(_reader.get_outline(), ensure_ascii=False)

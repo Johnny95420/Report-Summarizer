@@ -46,8 +46,12 @@ class BaseDocumentPreprocessor(ABC):
                     {
                         "page_id": page_id,
                         "headers": [
-                            {"header_level": len(hashes), "title": title.strip()[:50] + "...[truncated]"}
+                            {
+                                "header_level": len(hashes),
+                                "title": raw[:50] + "...[truncated]" if len(raw) > 50 else raw,
+                            }
                             for hashes, title in headings
+                            for raw in (title.strip(),)
                         ],
                     }
                 )

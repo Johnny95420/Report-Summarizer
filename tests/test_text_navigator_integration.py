@@ -34,10 +34,7 @@ _FAKE_EMB = DeterministicFakeEmbedding(size=64)
 
 def _write_doc_json(path: str, name: str, num_pages: int) -> None:
     """Write a minimal BaseReaderDocument JSON to *path* with *num_pages* pages."""
-    pages = [
-        {"page_content": f"Page {i} of {name}", "metadata": {"page_id": i}}
-        for i in range(num_pages)
-    ]
+    pages = [{"page_content": f"Page {i} of {name}", "metadata": {"page_id": i}} for i in range(num_pages)]
     data = {"date": "2026-01-01", "name": name, "outlines": [], "pages": pages}
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f)
@@ -100,7 +97,11 @@ class TestChromaCachePreservedAfterClose:
                 assert len(from_documents_calls) == 1, "Second open should reuse cache"
                 reader2.close_document()
         finally:
-            tn.get_embedding_model = tn.__class__.get_embedding_model if hasattr(tn.__class__, "get_embedding_model") else tn.get_embedding_model
+            tn.get_embedding_model = (
+                tn.__class__.get_embedding_model
+                if hasattr(tn.__class__, "get_embedding_model")
+                else tn.get_embedding_model
+            )
 
 
 @pytest.mark.integration

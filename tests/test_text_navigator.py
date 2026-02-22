@@ -5,6 +5,7 @@ Heavy deps (Chroma, BM25, HuggingFaceEmbeddings) are mocked.
 """
 
 import os
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -30,6 +31,7 @@ class TestConfigLoading:
     def test_default_persist_dir_is_absolute_path(self):
         """_DEFAULT_PERSIST_DIR should be an absolute path (anchored to project root)."""
         import os
+
         assert os.path.isabs(_DEFAULT_PERSIST_DIR)
 
 
@@ -244,8 +246,17 @@ class TestDedup:
 # ---------------------------------------------------------------------------
 class TestErrors:
     def test_open_nonexistent_file(self, reader):
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(RuntimeError, match="Failed to open"):
             reader.open_document("/nonexistent/path.json")
+
+    def test_open_document_logs_error_on_failure(self, reader, caplog):
+        """open_document logs logger.error with [open_document] prefix when file is missing."""
+        import logging
+
+        with caplog.at_level(logging.ERROR, logger="TextNavigator"):
+            with pytest.raises(RuntimeError):
+                reader.open_document("/nonexistent/path.json")
+        assert "[open_document] Failed to open" in caplog.text
 
     def test_open_document_state_reset_on_failure(self, reader, tmp_path, mock_indexing):
         """If indexing fails, state should be reset, not half-committed."""
@@ -382,9 +393,7 @@ class TestChromaCacheValidation:
 
             reader.open_document(path)
 
-        assert call_order == ["clear", "rmtree"], (
-            f"Expected clear_system_cache before rmtree, got: {call_order}"
-        )
+        assert call_order == ["clear", "rmtree"], f"Expected clear_system_cache before rmtree, got: {call_order}"
 
     def test_valid_cache_not_rebuilt(self, reader, tmp_path):
         """When Chroma cache count matches page count, no rebuild needed."""
@@ -444,6 +453,17 @@ class TestChromaCleanup:
         vectorstore.delete_collection.assert_not_called()
         assert reader._vectorstore is None
 
+    def test_close_document_preserves_bookmarks(self, reader, tmp_path, mock_indexing):
+        """close_document preserves bookmarks — they survive for the instance lifetime."""
+        doc = _make_base_doc()
+        path = _write_doc_json(tmp_path, doc)
+        reader.open_document(path)
+        reader.update_bookmark("chap1")
+        assert reader._bookmarks
+
+        reader.close_document()
+        assert "chap1" in reader._bookmarks
+
 
 # ---------------------------------------------------------------------------
 # get_embedding_model error handling (C9)
@@ -454,10 +474,8 @@ class TestGetEmbeddingModelErrors:
         import Tools.text_navigator as tn
 
         # Reset singleton
-        old_model = tn._embedding_model
-        old_name = tn._embedding_model_name
-        tn._embedding_model = None
-        tn._embedding_model_name = ""
+        old_state = tn._embedding_state
+        tn._embedding_state = None
 
         try:
             with (
@@ -466,8 +484,80 @@ class TestGetEmbeddingModelErrors:
             ):
                 tn.get_embedding_model("bad-model")
         finally:
-            tn._embedding_model = old_model
-            tn._embedding_model_name = old_name
+            tn._embedding_state = old_state
+
+    def test_concurrent_requests_return_matching_model_name(self):
+        """Concurrent callers must never receive an embedding for the wrong model name."""
+        import Tools.text_navigator as tn
+
+        old_state = tn._embedding_state
+        tn._embedding_state = None
+        mismatches: list[tuple[str, str]] = []
+        names = ("model-a", "model-b")
+        start = threading.Barrier(8)
+
+        class _FakeEmb:
+            def __init__(self, model_name: str):
+                self.model_name = model_name
+
+        def _worker(worker_id: int):
+            start.wait()
+            for i in range(200):
+                requested = names[(worker_id + i) % 2]
+                emb = tn.get_embedding_model(requested)
+                if emb.model_name != requested:
+                    mismatches.append((requested, emb.model_name))
+
+        try:
+            with patch("Tools.text_navigator.HuggingFaceEmbeddings", side_effect=_FakeEmb):
+                threads = [threading.Thread(target=_worker, args=(i,)) for i in range(8)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+        finally:
+            tn._embedding_state = old_state
+
+        assert mismatches == []
+
+    def test_cache_hit_skips_initialization(self):
+        """Fast path must NOT call HuggingFaceEmbeddings() again on cache hit."""
+        import Tools.text_navigator as tn
+
+        old_state = tn._embedding_state
+        tn._embedding_state = None
+        try:
+            with patch("Tools.text_navigator.HuggingFaceEmbeddings") as mock_emb:
+                mock_emb.return_value = MagicMock(model_name="shared-model")
+                emb1 = tn.get_embedding_model("shared-model")
+                assert mock_emb.call_count == 1
+                emb2 = tn.get_embedding_model("shared-model")
+                assert mock_emb.call_count == 1, "Cache hit must not reinitialize"
+                assert emb1 is emb2
+        finally:
+            tn._embedding_state = old_state
+
+    def test_model_name_mismatch_forces_rebuild(self):
+        """Requesting a different model_name must build a new HuggingFaceEmbeddings instance."""
+        import Tools.text_navigator as tn
+
+        old_state = tn._embedding_state
+        tn._embedding_state = None
+        try:
+            class _FakeEmb:
+                def __init__(self, model_name: str):
+                    self.model_name = model_name
+
+            with patch("Tools.text_navigator.HuggingFaceEmbeddings", side_effect=_FakeEmb) as mock_emb:
+                emb1 = tn.get_embedding_model("model-a")
+                assert emb1.model_name == "model-a"
+                assert mock_emb.call_count == 1
+                emb2 = tn.get_embedding_model("model-b")
+                assert emb2.model_name == "model-b"
+                assert mock_emb.call_count == 2, "Different model name must trigger rebuild"
+                assert emb1 is not emb2
+        finally:
+            tn._embedding_state = old_state
 
 
 # ---------------------------------------------------------------------------

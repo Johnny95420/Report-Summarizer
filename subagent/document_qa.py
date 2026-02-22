@@ -7,7 +7,7 @@ Graph topology:
     START → [agent] ←→ [tools]    (standard ReAct loop via ToolNode)
                  │
                  ├→ [extract_answer] → END  (submit_answer detected)
-                 ├→ [force_answer] → [extract_answer] → END  (budget exhausted)
+                 ├→ [force_answer] → [extract_answer] → END  (budget exhausted | consecutive_errors ≥ _CONSECUTIVE_ERROR_THRESHOLD | consecutive_text_only ≥ _CONSECUTIVE_TEXT_ONLY_THRESHOLD)
                  └→ [agent]  (text-only planning, no tool calls → loop back)
 """
 
@@ -24,6 +24,7 @@ from langgraph.prebuilt import ToolNode
 
 from Prompt.document_qa_prompt import DOCUMENT_QA_SYSTEM_PROMPT
 from State.document_qa_state import DocumentQAState
+from Tools.reader_models import FileReference
 from Tools.text_navigator import AgentDocumentReader
 from Utils.utils import call_llm
 
@@ -35,7 +36,9 @@ MODEL_NAME = config["MODEL_NAME"]
 BACKUP_MODEL_NAME = config["BACKUP_MODEL_NAME"]
 
 logger = logging.getLogger("DocumentQA")
-logger.setLevel(logging.ERROR)
+
+_CONSECUTIVE_ERROR_THRESHOLD: int = 3
+_CONSECUTIVE_TEXT_ONLY_THRESHOLD: int = 3
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +107,7 @@ def agent_node(state: DocumentQAState, config: RunnableConfig):
     except Exception as e:
         logger.error("[agent] LLM call failed at iteration %d: %s", iteration, e)
         consecutive_errors += 1
-        if consecutive_errors >= 3:
+        if consecutive_errors >= _CONSECUTIVE_ERROR_THRESHOLD:
             response = AIMessage(
                 content=f"[LLM failed {consecutive_errors} times consecutively. Forcing answer submission.]"
             )
@@ -166,8 +169,26 @@ def extract_answer_node(state: DocumentQAState):
 
 
 def force_answer_node(state: DocumentQAState):
-    """Final LLM call with only submit_answer available when budget is exhausted."""
-    logger.warning("[force_answer] Budget exhausted at iteration %d — forcing submit_answer", state.get("iteration", 0))
+    """Force the agent to submit an answer immediately.
+
+    Triggered by route_response when any of these conditions are met:
+      - iteration >= budget (budget exhausted)
+      - consecutive_errors >= _CONSECUTIVE_ERROR_THRESHOLD (LLM circuit breaker)
+      - consecutive_text_only >= _CONSECUTIVE_TEXT_ONLY_THRESHOLD (degenerate loop)
+
+    Only submit_answer is available in the tool list to prevent further exploration.
+    """
+    iteration = state.get("iteration", 0)
+    consecutive_errors = state.get("consecutive_errors", 0)
+    consecutive_text_only = state.get("consecutive_text_only", 0)
+    budget = state["budget"]
+    if consecutive_errors >= _CONSECUTIVE_ERROR_THRESHOLD:
+        reason = f"consecutive_errors={consecutive_errors} >= {_CONSECUTIVE_ERROR_THRESHOLD}"
+    elif consecutive_text_only >= _CONSECUTIVE_TEXT_ONLY_THRESHOLD:
+        reason = f"consecutive_text_only={consecutive_text_only} >= {_CONSECUTIVE_TEXT_ONLY_THRESHOLD}"
+    else:
+        reason = f"budget exhausted ({iteration}/{budget})"
+    logger.error("[force_answer] Triggered at iteration %d — reason: %s", iteration, reason)
     messages = list(state["messages"])
     messages.append(
         HumanMessage(
@@ -212,13 +233,13 @@ def route_response(state: DocumentQAState) -> str:
         return "extract_answer"
 
     # 2. Consecutive LLM errors → force answer
-    if state.get("consecutive_errors", 0) >= 3:
-        logger.warning("[route] %d consecutive errors → force_answer", state.get("consecutive_errors", 0))
+    if state.get("consecutive_errors", 0) >= _CONSECUTIVE_ERROR_THRESHOLD:
+        logger.error("[route] %d consecutive errors → force_answer", state.get("consecutive_errors", 0))
         return "force_answer"
 
     # 3. Budget exhausted → force answer
     if state.get("iteration", 0) >= state["budget"]:
-        logger.warning("[route] Budget exhausted (%d/%d) → force_answer", state.get("iteration", 0), state["budget"])
+        logger.error("[route] Budget exhausted (%d/%d) → force_answer", state.get("iteration", 0), state["budget"])
         return "force_answer"
 
     # 4. Has tool calls → execute them
@@ -228,10 +249,8 @@ def route_response(state: DocumentQAState) -> str:
         return "tools"
 
     # 5. No tool calls (text-only planning) — check for degenerate loop
-    if state.get("consecutive_text_only", 0) >= 3:
-        logger.warning(
-            "[route] %d consecutive text-only responses → force_answer", state.get("consecutive_text_only", 0)
-        )
+    if state.get("consecutive_text_only", 0) >= _CONSECUTIVE_TEXT_ONLY_THRESHOLD:
+        logger.error("[route] %d consecutive text-only responses → force_answer", state.get("consecutive_text_only", 0))
         return "force_answer"
 
     logger.info("[route] No tool calls (planning) → agent")
@@ -321,8 +340,10 @@ def _validate_inputs(file_paths: list[dict], question: str, budget: int) -> None
     if not file_paths:
         raise ValueError("file_paths must be a non-empty list")
     for i, fp in enumerate(file_paths):
-        if not isinstance(fp, dict) or "name" not in fp or "path" not in fp:
-            raise ValueError(f"file_paths[{i}] must be a dict with 'name' and 'path' keys, got: {fp}")
+        try:
+            FileReference(**fp)
+        except Exception as e:
+            raise ValueError(f"file_paths[{i}] must be a dict with 'name' and 'path' keys, got: {fp}") from e
     if not question or not question.strip():
         raise ValueError("question must be a non-empty string")
     if budget <= 0:
