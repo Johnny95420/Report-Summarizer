@@ -19,6 +19,7 @@ class TestLengthUnits:
     PROMPT_FILES = [
         "Prompt/industry_prompt.py",
         "Prompt/agentic_search_prompt.py",
+        "Prompt/document_qa_prompt.py",
     ]
 
     @pytest.mark.parametrize("prompt_file", PROMPT_FILES)

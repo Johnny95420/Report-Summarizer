@@ -107,7 +107,7 @@ ignore = [
 "Prompt/*" = ["RUF001"]            # prompt templates contain unicode by design
 
 [tool.ruff.lint.isort]
-known-first-party = ["Prompt", "State", "Tools", "Utils"]
+known-first-party = ["Prompt", "State", "Tools", "Utils", "subagent"]
 
 [tool.ruff.format]
 quote-style = "double"
