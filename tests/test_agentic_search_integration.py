@@ -21,13 +21,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-def pytest_configure(config):
-    config.addinivalue_line(
-        "markers",
-        "integration: full-graph LangGraph state propagation integration tests",
-    )
-
-
 # ---------------------------------------------------------------------------
 # Shared fake data
 # ---------------------------------------------------------------------------
