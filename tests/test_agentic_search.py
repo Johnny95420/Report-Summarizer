@@ -539,6 +539,30 @@ def test_compress_passthrough_short_content():
     mock_llm.assert_not_called()
 
 
+def test_compress_passthrough_none_raw_content():
+    """Results with raw_content=None are passed through without crashing or being dropped."""
+    none_result = {
+        "title": "PDF Article",
+        "content": "brief",
+        "url": "https://example.com/file.pdf",
+        "raw_content": None,
+    }
+    state = {
+        "queries": ["test query"],
+        "followed_up_queries": [],
+        "filtered_web_results": [{"results": [none_result]}],
+    }
+    with patch("subagent.agentic_search.call_llm_async") as mock_llm:
+        result = asyncio.run(compress_raw_content(state))
+    compressed = result["compressed_web_results"]
+    # Result must not be dropped
+    assert len(compressed[0]["results"]) == 1
+    # raw_content preserved as-is (None)
+    assert compressed[0]["results"][0]["raw_content"] is None
+    # No LLM call (None treated as empty → pass-through)
+    mock_llm.assert_not_called()
+
+
 def test_compress_llm_called_for_long_content():
     """Results with raw_content >= 5000 chars trigger the LLM compression path."""
     long_result = {

@@ -193,7 +193,7 @@ async def filter_and_format_results(state: AgenticSearchState):
         """Check quality with semaphore control and metadata preservation."""
         async with semaphore:
             try:
-                raw = result['raw_content']
+                raw = result.get('raw_content') or ""
                 raw_preview = raw[:500] + "...[greater than 500 words truncated]" if len(raw) > 500 else raw
                 document = (
                     f"Title:{result['title']}\n\nContent:{result['content']}\n\nRaw Content:{raw_preview}"
@@ -254,8 +254,8 @@ async def compress_raw_content(state: AgenticSearchState):
         Short content (< _COMPRESS_CHAR_THRESHOLD chars) is passed through unchanged to avoid
         unnecessary LLM calls. Only long content goes through LLM compression.
         """
-        # Pass-through: short content needs no compression
-        if len(result["raw_content"]) < _COMPRESS_CHAR_THRESHOLD:
+        # Pass-through: short/empty/None content needs no compression
+        if len(result.get("raw_content") or "") < _COMPRESS_CHAR_THRESHOLD:
             return query_idx, result_idx, result, "passthrough"
 
         async with semaphore:
