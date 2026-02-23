@@ -8,12 +8,15 @@ import pytest
 from langgraph.graph import END
 
 from subagent.agentic_search import (
+    aggregate_final_results,
     check_search_quality_async,
     check_searching_results,
     compress_raw_content,
     filter_and_format_results,
+    generate_queries_from_question,
     perform_web_search,
     queries_rewriter,
+    synthesize_answer,
 )
 
 
@@ -101,8 +104,8 @@ class TestCheckSearchingResultsGuard:
         mock_result = MagicMock()
         mock_result.tool_calls = []  # empty → IndexError
         state = {
-            "queries": ["test"],
-            "source_str": "some sources",
+            "question": "What are Tesla's key revenue drivers?",
+            "answer": "Some answer",
             "curr_num_iterations": 0,
             "max_num_iterations": 5,
         }
@@ -115,8 +118,8 @@ class TestCheckSearchingResultsGuard:
         mock_result = MagicMock()
         mock_result.tool_calls = [{"args": {"grade": "pass", "follow_up_queries": []}}]
         state = {
-            "queries": ["test"],
-            "source_str": "some sources",
+            "question": "What are Tesla's key revenue drivers?",
+            "answer": "Tesla's main revenue driver is automotive sales.",
             "curr_num_iterations": 0,
             "max_num_iterations": 5,
         }
@@ -129,8 +132,8 @@ class TestCheckSearchingResultsGuard:
         mock_result = MagicMock()
         mock_result.tool_calls = [{"args": {"grade": "fail", "follow_up_queries": ["follow up"]}}]
         state = {
-            "queries": ["test"],
-            "source_str": "some sources",
+            "question": "What are Tesla's key revenue drivers?",
+            "answer": "Tesla sells cars.",
             "curr_num_iterations": 0,
             "max_num_iterations": 5,
         }
@@ -138,6 +141,19 @@ class TestCheckSearchingResultsGuard:
             cmd = check_searching_results(state)
         assert cmd.goto == "perform_web_search"
         assert cmd.update["followed_up_queries"] == ["follow up"]
+
+    def test_routes_to_end_when_iterations_exhausted(self):
+        """When curr_num_iterations >= max_num_iterations, skip LLM and go to END."""
+        state = {
+            "question": "What are Tesla's key revenue drivers?",
+            "answer": "Some answer",
+            "curr_num_iterations": 3,
+            "max_num_iterations": 3,
+        }
+        with patch("subagent.agentic_search.call_llm") as mock_llm:
+            cmd = check_searching_results(state)
+        mock_llm.assert_not_called()
+        assert cmd.goto == END
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +400,7 @@ class TestCompressRawContentLLMFailure:
         so it is visible under the module's ERROR-level logger.
         """
         state = _compress_state(
-            [[{"url": "http://x.com", "title": "T", "content": "C", "raw_content": "RC"}]]
+            [[{"url": "http://x.com", "title": "T", "content": "C", "raw_content": "R" * 6000}]]
         )
         with patch("subagent.agentic_search.call_llm_async", side_effect=Exception("LLM down")):
             with caplog.at_level(logging.ERROR, logger="AgenticSearch"):
@@ -393,3 +409,152 @@ class TestCompressRawContentLLMFailure:
         assert any("Content compression failed" in msg for msg in error_messages), (
             "ERROR log must be emitted when compression LLM raises"
         )
+
+
+# ---------------------------------------------------------------------------
+# New nodes: generate_queries_from_question
+# ---------------------------------------------------------------------------
+class TestGenerateQueriesFromQuestion:
+    def test_returns_queries_list(self):
+        """Normal path: should return a list of search queries."""
+        mock_result = MagicMock()
+        mock_result.tool_calls = [{"args": {"queries": ["Tesla revenue Q1 2024", "Tesla FSD subscription 2024"]}}]
+        state = {
+            "question": (
+                "Main Question: What are Tesla's key revenue drivers in Q1 2024?\n"
+                "- Sub-question 1: What is the automotive vs. energy revenue split?\n"
+                "- Sub-question 2: How did FSD subscription revenue perform?"
+            )
+        }
+        with patch("subagent.agentic_search.call_llm", return_value=mock_result):
+            result = generate_queries_from_question(state)
+        assert result["queries"] == ["Tesla revenue Q1 2024", "Tesla FSD subscription 2024"]
+
+    def test_falls_back_to_question_on_parse_failure(self):
+        """When tool_calls parse fails, should fall back to the question itself as a query."""
+        mock_result = MagicMock()
+        mock_result.tool_calls = []  # empty → fallback
+        question = "Main Question: What are Tesla's key revenue drivers?"
+        state = {"question": question}
+        with patch("subagent.agentic_search.call_llm", return_value=mock_result):
+            result = generate_queries_from_question(state)
+        assert result["queries"] == [question]
+
+
+# ---------------------------------------------------------------------------
+# New nodes: synthesize_answer
+# ---------------------------------------------------------------------------
+class TestSynthesizeAnswer:
+    def test_returns_answer_on_first_iteration(self):
+        """First iteration (empty previous answer): synthesizes answer from materials."""
+        mock_result = MagicMock()
+        mock_result.tool_calls = [{"args": {"answer": "Tesla's main revenue is automotive. [1]\n\n### Sources\n[1] Reuters — http://x.com"}}]
+        state = {
+            "question": "What are Tesla's key revenue drivers?",
+            "answer": "",
+            "materials": "## Source 1\nTesla Q1 2024 automotive revenue: $17.4B",
+            "curr_num_iterations": 1,
+        }
+        with patch("subagent.agentic_search.call_llm", return_value=mock_result):
+            result = synthesize_answer(state)
+        assert "answer" in result
+        assert len(result["answer"]) > 0
+
+    def test_updates_answer_on_subsequent_iteration(self):
+        """Subsequent iteration: synthesizes updated answer incorporating new materials."""
+        mock_result = MagicMock()
+        mock_result.tool_calls = [{"args": {"answer": "Updated comprehensive answer. [1][2]"}}]
+        state = {
+            "question": "What are Tesla's key revenue drivers?",
+            "answer": "Initial answer from iteration 1. [1]",
+            "materials": "New materials from iteration 2",
+            "curr_num_iterations": 2,
+        }
+        with patch("subagent.agentic_search.call_llm", return_value=mock_result):
+            result = synthesize_answer(state)
+        assert result["answer"] == "Updated comprehensive answer. [1][2]"
+
+    def test_falls_back_on_parse_failure(self):
+        """When tool_calls parse fails, falls back to concatenating previous answer + materials."""
+        mock_result = MagicMock()
+        mock_result.tool_calls = []  # empty → fallback
+        state = {
+            "question": "What are Tesla's key revenue drivers?",
+            "answer": "Previous answer",
+            "materials": "New materials",
+            "curr_num_iterations": 2,
+        }
+        with patch("subagent.agentic_search.call_llm", return_value=mock_result):
+            result = synthesize_answer(state)
+        assert "Previous answer" in result["answer"]
+        assert "New materials" in result["answer"]
+
+
+# ---------------------------------------------------------------------------
+# aggregate_final_results: materials reset each round
+# ---------------------------------------------------------------------------
+class TestAggregateFinalResultsMaterialsReset:
+    def test_materials_contains_only_current_iteration_results(self):
+        """materials should be reset each round (not cumulative like old source_str)."""
+        state = {
+            "compressed_web_results": [{"results": [
+                {"title": "Iteration 2 Article", "content": "c", "raw_content": "r", "url": "http://b.com"}
+            ]}],
+        }
+        formatted = "Iteration 2 Article"
+        with patch(
+            "subagent.agentic_search.web_search_deduplicate_and_format_sources",
+            return_value=formatted,
+        ):
+            result = aggregate_final_results(state)
+
+        assert "materials" in result
+        assert result["materials"] == formatted
+        # Old source_str key must not appear
+        assert "source_str" not in result
+
+
+# ---------------------------------------------------------------------------
+# compress_raw_content pass-through: short content skips LLM, long content calls it
+# ---------------------------------------------------------------------------
+def test_compress_passthrough_short_content():
+    """Results with raw_content < 5000 chars are passed through without any LLM call."""
+    short_result = {
+        "title": "Short Article",
+        "content": "brief",
+        "url": "https://example.com/short",
+        "raw_content": "x" * 100,  # well under 5000
+    }
+    state = {
+        "queries": ["test query"],
+        "followed_up_queries": [],
+        "filtered_web_results": [{"results": [short_result]}],
+    }
+    with patch("subagent.agentic_search.call_llm_async") as mock_llm:
+        result = asyncio.run(compress_raw_content(state))
+    compressed = result["compressed_web_results"]
+    # raw_content must be unchanged
+    assert compressed[0]["results"][0]["raw_content"] == short_result["raw_content"]
+    # No LLM call should have been made
+    mock_llm.assert_not_called()
+
+
+def test_compress_llm_called_for_long_content():
+    """Results with raw_content >= 5000 chars trigger the LLM compression path."""
+    long_result = {
+        "title": "Long Article",
+        "content": "detailed",
+        "url": "https://example.com/long",
+        "raw_content": "y" * 6000,  # over 5000
+    }
+    state = {
+        "queries": ["test query"],
+        "followed_up_queries": [],
+        "filtered_web_results": [{"results": [long_result]}],
+    }
+    mock_compressed = MagicMock()
+    mock_compressed.tool_calls = [{"args": {"summary_content": "compressed"}}]
+    with patch("subagent.agentic_search.call_llm_async", return_value=mock_compressed) as mock_llm:
+        asyncio.run(compress_raw_content(state))
+    # LLM must have been called exactly once
+    mock_llm.assert_called_once()
