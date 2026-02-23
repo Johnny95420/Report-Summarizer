@@ -164,6 +164,7 @@ Your job is to craft a section of a professional report that is clear, logically
    - Every inline citation `[N]` must correspond to entry `[N]` in the `### Sources` list at the end of the section
 
 2. **SEQUENTIAL NUMBERING REQUIRED**:
+   - Always start numbering from [1]. NEVER use [0].
    - Assign sequential numbers [1], [2], [3], … to sources in the order they are first cited in the text
    - Every [N] in the text MUST correspond to entry [N] in the `### Sources` list
    - Do NOT reuse the same number for different sources
@@ -195,8 +196,8 @@ Your job is to craft a section of a professional report that is clear, logically
 <Citation and Language Guidelines>
 - **Inline Citations**: For any key data, statistics, or direct claims, you must provide an inline citation immediately after the statement. Use numbered format `[1]`, `[2]`, etc. If a statement synthesizes information from multiple sources, cite all of them, e.g., `[1][2]`. All cited sources must also be listed in the final `### Sources` section.
 - End with `### Sources` formatted as:
-  * `[N] Title — URL`
-  * Example: `[1] Reuters — https://reuters.com/...`
+  * `- [N] Title — URL`
+  * Example: `- [1] Reuters — https://reuters.com/...`
 - Use traditional chinese to write the report
 </Citation and Language Guidelines>
 
@@ -395,7 +396,7 @@ refine_section_instructions = (
   * When adding new citations, assign the next sequential number and add the source to the `### Sources` list
   * NEVER modify existing citation numbers to point to non-existent sources
   * If you cannot verify a source's existence in the context, REMOVE the claim rather than fabricating a citation
-  * Every `[N]` inline citation MUST have a matching `[N] Title — URL` entry in the `### Sources` list
+  * Every `[N]` inline citation MUST have a matching `- [N] Title — URL` entry in the `### Sources` list
 </STRICT SOURCE CITATION INTEGRITY>
 
 <Tone and Style Guidelines>
@@ -435,8 +436,8 @@ For "content":
       * Or a list using proper Markdown list syntax (`*`, `-`, `1.`).
     - **Inline Citations**: For any key data, statistics, or direct claims, provide an inline citation immediately after the statement using numbered format `[1]`, `[2]`, etc. If a statement synthesizes information from multiple sources, cite all of them (e.g., `[1][2]`).
     - **Sources Section**: End with `### Sources` formatted as:
-      * `[N] Title — URL`
-      * Example: `[1] Reuters — https://reuters.com/...`
+      * `- [N] Title — URL`
+      * Example: `- [1] Reuters — https://reuters.com/...`
     - **Language**: Use **Traditional Chinese** to write the report.
 </Content Requirements>
 
@@ -515,7 +516,7 @@ This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publ
   * NEVER fabricate a new source to support a claim
 
 - **Source Metadata Accuracy**:
-  * Sources list format: `[N] Title — URL`
+  * Sources list format: `- [N] Title — URL`
   * Preserve original URLs exactly as provided
   * Use original dates from source material without modification
 </SOURCE VALIDATION REQUIREMENTS>
@@ -530,7 +531,7 @@ This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publ
   - **Title**: Use `##` only once for the section title (Markdown format)
   - **Structural Elements**: Only retain structural elements that genuinely clarify points (focused tables or proper Markdown lists)
   - **Inline Citations**: Verify all key data, statistics, and claims have immediate numbered inline citations (e.g., `[1]`, `[2]`)
-  - **Sources Section**: Confirm it ends with properly formatted `### Sources` section (`[N] Title — URL`)
+  - **Sources Section**: Confirm it ends with properly formatted `### Sources` section (`- [N] Title — URL`)
 </Final Content Quality Requirements>
 
 <Final Quality Validation>
