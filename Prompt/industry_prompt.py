@@ -14,7 +14,7 @@ report_planner_query_writer_instructions = (
 </Report organization>
 
 <Task>
-Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information for planning the report sections.
+Your goal is to generate {planner_search_queries} search queries that will help gather comprehensive information for planning the report sections.
 
 The queries should:
 
