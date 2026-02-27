@@ -428,7 +428,7 @@ def check_searching_results(state: AgenticSearchState):
     question = state["question"]
     answer = state.get("answer", "")
     if state["curr_num_iterations"] >= state["max_num_iterations"]:
-        return Command(goto=END)
+        return Command(goto="finalize_answer")
 
     system_instruction = searching_results_grader.format(question=question, answer=answer)
 
@@ -444,9 +444,9 @@ def check_searching_results(state: AgenticSearchState):
         feedback = feedback.tool_calls[0]["args"]
     except (IndexError, KeyError, TypeError) as e:
         logger.error("Failed to parse search grader feedback: %s", e)
-        return Command(goto=END)
+        return Command(goto="finalize_answer")
     if feedback["grade"] == "pass":
-        return Command(goto=END)
+        return Command(goto="finalize_answer")
     else:
         follow_up_queries = feedback["follow_up_queries"]
         if isinstance(follow_up_queries, str):
@@ -455,6 +455,14 @@ def check_searching_results(state: AgenticSearchState):
             update={"followed_up_queries": follow_up_queries},
             goto="perform_web_search",
         )
+
+
+def finalize_answer(state: AgenticSearchState) -> dict:
+    """Append ### Sources section to answer using source_registry (no LLM call)."""
+    return {"answer": _format_sources_section(
+        state.get("answer", ""),
+        state.get("source_registry", []),
+    )}
 
 
 class AgenticSearchGraphBuilder:
@@ -472,6 +480,7 @@ class AgenticSearchGraphBuilder:
             builder.add_node("aggregate_final_results", aggregate_final_results)
             builder.add_node("synthesize_answer", synthesize_answer)
             builder.add_node("check_searching_results", check_searching_results)
+            builder.add_node("finalize_answer", finalize_answer)
 
             builder.add_edge(START, "get_searching_budget")
             builder.add_edge("get_searching_budget", "generate_queries_from_question")
@@ -481,6 +490,7 @@ class AgenticSearchGraphBuilder:
             builder.add_edge("compress_raw_content", "aggregate_final_results")
             builder.add_edge("aggregate_final_results", "synthesize_answer")
             builder.add_edge("synthesize_answer", "check_searching_results")
+            builder.add_edge("finalize_answer", END)
 
             self._graph = builder.compile()
         return self._graph

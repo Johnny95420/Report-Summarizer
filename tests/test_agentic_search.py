@@ -5,8 +5,6 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
-from langgraph.graph import END
-
 from subagent.agentic_search import (
     aggregate_final_results,
     check_search_quality_async,
@@ -96,11 +94,11 @@ class TestCompressRawContentGuard:
 
 
 # ---------------------------------------------------------------------------
-# C8 — Guard #4: check_searching_results returns END on parse failure
+# C8 — Guard #4: check_searching_results routes to finalize_answer on parse failure
 # ---------------------------------------------------------------------------
 class TestCheckSearchingResultsGuard:
-    def test_routes_to_end_on_parse_failure(self):
-        """When feedback tool_calls parse fails, should return Command(goto=END)."""
+    def test_routes_to_finalize_on_parse_failure(self):
+        """When feedback tool_calls parse fails, should return Command(goto='finalize_answer')."""
         mock_result = MagicMock()
         mock_result.tool_calls = []  # empty → IndexError
         state = {
@@ -111,10 +109,10 @@ class TestCheckSearchingResultsGuard:
         }
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             cmd = check_searching_results(state)
-        assert cmd.goto == END
+        assert cmd.goto == "finalize_answer"
 
-    def test_routes_to_end_on_pass(self):
-        """Normal path: grade='pass' should route to END."""
+    def test_routes_to_finalize_on_pass(self):
+        """Normal path: grade='pass' should route to finalize_answer."""
         mock_result = MagicMock()
         mock_result.tool_calls = [{"args": {"grade": "pass", "follow_up_queries": []}}]
         state = {
@@ -125,7 +123,7 @@ class TestCheckSearchingResultsGuard:
         }
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             cmd = check_searching_results(state)
-        assert cmd.goto == END
+        assert cmd.goto == "finalize_answer"
 
     def test_routes_to_search_on_fail(self):
         """Normal path: grade='fail' should route back to perform_web_search."""
@@ -142,8 +140,8 @@ class TestCheckSearchingResultsGuard:
         assert cmd.goto == "perform_web_search"
         assert cmd.update["followed_up_queries"] == ["follow up"]
 
-    def test_routes_to_end_when_iterations_exhausted(self):
-        """When curr_num_iterations >= max_num_iterations, skip LLM and go to END."""
+    def test_routes_to_finalize_when_iterations_exhausted(self):
+        """When curr_num_iterations >= max_num_iterations, skip LLM and go to finalize_answer."""
         state = {
             "question": "What are Tesla's key revenue drivers?",
             "answer": "Some answer",
@@ -153,7 +151,7 @@ class TestCheckSearchingResultsGuard:
         with patch("subagent.agentic_search.call_llm") as mock_llm:
             cmd = check_searching_results(state)
         mock_llm.assert_not_called()
-        assert cmd.goto == END
+        assert cmd.goto == "finalize_answer"
 
 
 # ---------------------------------------------------------------------------
