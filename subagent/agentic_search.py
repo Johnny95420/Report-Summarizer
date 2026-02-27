@@ -531,7 +531,7 @@ if __name__ == "__main__":
         t_start = t_prev
 
         async for event in agentic_search_graph.astream(
-            {"question": question, "url_memo": set(), "max_num_iterations": num_iterations},
+            {"question": question, "url_memo": set(), "source_registry": [], "max_num_iterations": num_iterations},
             stream_mode="updates",
         ):
             t_now = time.perf_counter()

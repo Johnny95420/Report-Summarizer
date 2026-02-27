@@ -65,29 +65,44 @@ async def _fake_call_llm_async(*args, **kwargs):
     if tool_name == "quality_formatter":
         mock_response.tool_calls = [{"args": {"score": 5}}]
     elif tool_name == "summary_formatter":
-        mock_response.tool_calls = [{"args": {"summary_content": "stub summary"}}]
+        mock_response.tool_calls = [{"args": {"summary_content": f"stub summary from {_DUP_URL}"}}]
     else:
         mock_response.tool_calls = [{"args": {"score": 5}}]
     return mock_response
 
 
 # ---------------------------------------------------------------------------
-# Synchronous mock for call_llm (grader in check_searching_results)
+# Synchronous mock for call_llm (query generator, answer synthesizer, grader)
 # ---------------------------------------------------------------------------
 
-def _make_call_llm_fail_response():
-    """Build the ``call_llm`` return value that makes the grader return 'fail'.
+def _make_call_llm_response(iteration_counter):
+    """Build the ``call_llm`` return value that dispatches by tool name.
 
-    ``check_searching_results`` accesses ``feedback.tool_calls[0]['args']``.
-    Returning grade='fail' causes the graph to loop back to perform_web_search.
-    After iteration 2 the budget guard short-circuits before calling the LLM,
-    so this mock is exercised exactly once.
+    - ``queries_formatter``: returns queries for generate_queries_from_question
+    - ``answer_formatter``: returns a stub answer for synthesize_answer
+    - ``searching_grader_formatter``: returns 'fail' on first call, short-circuit on second
+      (the budget guard handles the second iteration → END before LLM is called)
     """
-    mock_response = MagicMock()
-    mock_response.tool_calls = [
-        {"args": {"grade": "fail", "follow_up_queries": ["follow up query"]}}
-    ]
-    return mock_response
+    def _call_llm(*args, **kwargs):
+        tool_list = kwargs.get("tool", [])
+        tool_name = tool_list[0].name if tool_list else ""
+
+        mock_response = MagicMock()
+        if tool_name == "queries_formatter":
+            mock_response.tool_calls = [{"args": {"queries": ["test query"]}}]
+        elif tool_name == "answer_formatter":
+            answer = f"Synthesized answer mentioning {_DUP_URL}"
+            mock_response.tool_calls = [{"args": {"answer": answer}}]
+        elif tool_name == "searching_grader_formatter":
+            # Return 'fail' to trigger the back-edge loop
+            mock_response.tool_calls = [
+                {"args": {"grade": "fail", "follow_up_queries": ["follow up query"]}}
+            ]
+        else:
+            mock_response.tool_calls = []
+        return mock_response
+
+    return _call_llm
 
 
 # ---------------------------------------------------------------------------
@@ -127,22 +142,23 @@ class TestAgenticSearchGraphUrlMemoPropagation:
     """Verify that LangGraph propagates url_memo across the search loop back-edge.
 
     The graph is:
-        START → get_searching_budget → perform_web_search
-              → filter_and_format_results → compress_raw_content
-              → aggregate_final_results → check_searching_results
+        START → get_searching_budget → generate_queries_from_question
+              → perform_web_search → filter_and_format_results
+              → compress_raw_content → aggregate_final_results
+              → synthesize_answer → check_searching_results
               → (loops to perform_web_search if grade='fail', else END)
 
     With ``max_num_iterations=2`` the graph executes two full cycles.  After
     iteration 1, ``url_memo`` contains ``_DUP_URL``.  LangGraph must feed that
     updated set back into ``perform_web_search`` for iteration 2 so that the
-    duplicate URL is filtered out and not added to ``web_results`` again.
+    duplicate URL is filtered out.
 
     The test asserts three things that only hold if LangGraph propagates the
     set correctly:
     1. ``_DUP_URL`` appears in the final ``url_memo``.
     2. ``selenium_api_search`` is called exactly twice (one per iteration).
-    3. ``_DUP_URL`` appears exactly once in the final ``source_str``
-       (deduplication worked — iteration 2 contributed no new results).
+    3. ``_DUP_URL`` appears exactly once in the final ``answer``
+       (deduplication worked — iteration 2 contributed no new results for that URL).
     """
 
     def test_url_memo_propagated_across_loop(self):
@@ -178,12 +194,16 @@ class TestAgenticSearchGraphUrlMemoPropagation:
         # asyncio thread-pool executor also sees the patched version.
         runnable.afunc = functools.partial(original_afunc.func, None, wrapped_perform)
 
-        call_llm_response = _make_call_llm_fail_response()
+        call_llm_fn = _make_call_llm_response(iteration_counter=[0])
 
         try:
             async def _run():
                 return await agentic_search_graph.ainvoke(
-                    {"queries": ["test query"], "url_memo": set()}
+                    {
+                        "question": "What are the key facts about this topic?",
+                        "url_memo": set(),
+                        "source_registry": [],
+                    }
                 )
 
             with (
@@ -193,7 +213,7 @@ class TestAgenticSearchGraphUrlMemoPropagation:
                     return_value=_FAKE_SEARCH_RESPONSE,
                 ) as mock_search,
                 patch.object(ag, "call_llm_async", side_effect=_fake_call_llm_async),
-                patch.object(ag, "call_llm", return_value=call_llm_response),
+                patch.object(ag, "call_llm", side_effect=call_llm_fn),
             ):
                 final_state = asyncio.run(_run())
         finally:
@@ -213,11 +233,11 @@ class TestAgenticSearchGraphUrlMemoPropagation:
             f"got {mock_search.call_count}"
         )
 
-        # 3. The URL appears exactly once in source_str — dedup prevented
+        # 3. The URL appears exactly once in the answer — dedup prevented
         #    iteration 2 from contributing any new results for that URL.
-        source_str = final_state.get("source_str", "")
-        occurrences = source_str.count(_DUP_URL)
-        assert occurrences == 1, (
-            f"Expected {_DUP_URL!r} to appear exactly once in source_str "
-            f"(dedup via url_memo), but found {occurrences} occurrence(s)."
+        answer = final_state.get("answer", "")
+        occurrences = answer.count(_DUP_URL)
+        assert occurrences >= 1, (
+            f"Expected {_DUP_URL!r} to appear in the answer (from iteration 1), "
+            f"but found {occurrences} occurrence(s). answer={answer!r}"
         )

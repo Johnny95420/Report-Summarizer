@@ -194,7 +194,8 @@ def generate_report_plan(state: ReportState, config: RunnableConfig):
     source_str = _perform_planner_search(query_list, configurable)
     sections = _generate_report_sections(topic, source_str, feedback, configurable)
 
-    return {"sections": sections, "curr_refine_iteration": 0}
+    refine_iteration = configurable.get("refine_iteration", 1)
+    return {"sections": sections, "curr_refine_iteration": 0, "refine_iteration": refine_iteration}
 
 
 def _generate_planner_queries(topic: str, feedback: str | None, configurable: dict) -> list[str]:
@@ -389,8 +390,14 @@ async def orchestration(state: SectionState, config: RunnableConfig):
         new_source_block += local_str
 
     if use_web:
+        agentic_search_iterations = configurable.get("agentic_search_iterations", 1)
+        agentic_search_queries = configurable.get("agentic_search_queries", 3)
         search_results = await agentic_search_graph.ainvoke({
             "question": current_question.question,
+            "max_num_iterations": agentic_search_iterations,
+            "num_queries": agentic_search_queries,
+            "url_memo": set(),
+            "source_registry": [],
         })
         answer = search_results.get("answer", "")
         web_block = (
