@@ -393,11 +393,18 @@ def synthesize_answer(state: AgenticSearchState):
     question = state["question"]
     materials = state.get("materials", "")
     previous_answer = state.get("answer", "")
+    source_registry = state.get("source_registry", [])
+
+    registry_str = "\n".join(
+        f"[{i+1}] {e['title']} — {e['url']}"
+        for i, e in enumerate(source_registry)
+    ) or "(no sources registered yet)"
 
     system_instruction = answer_synthesizer_instructions.format(
         question=question,
         previous_answer=previous_answer,
         materials=materials,
+        source_registry=registry_str,
     )
 
     result = call_llm(

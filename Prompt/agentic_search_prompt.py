@@ -85,11 +85,47 @@ Futures:
 </Queries to Refine>
 """
 
+query_writer_instructions = """You are an expert Search Query Engineer for financial and market research.
+
+<Task>
+Given a research question (with embedded sub-questions), generate exactly {num_queries} concrete keyword-based search engine queries
+that together comprehensively cover all aspects of the question.
+</Task>
+
+<Query Format>
+- Use KEYWORDS, not sentences (target 3-8 words; up to 12 for complex multi-concept queries)
+- Format: [Entity] [Concept] [Time?]
+- Examples: "台積電 N3 良率 2023 Q4" | "US CPI December 2023" | "Nvidia H100 supply chain hyperscaler capex 2024"
+</Query Format>
+
+<Strategy>
+1. Generate one query per distinct aspect of the research question (main question + each sub-question).
+2. Vary the angle: broad overview, specific metrics, competitive comparison, risk factors, regulatory context.
+3. Be specific: include entity names, time periods, and key metrics.
+4. Avoid redundant or near-duplicate queries.
+</Strategy>
+
+<Language Rules>
+- Taiwan-only topics: Traditional Chinese
+- Global/US/Europe/Asia topics: English
+</Language Rules>
+
+<Research Question>
+{question}
+</Research Question>
+
+Generate exactly {num_queries} queries. NEVER generate fewer or more.
+"""
+
 results_filter_instruction = """You are an expert "Search Quality Rater."  Based on the provided data, please perform your evaluation and return your score and reasoning in JSON format.
 
 <Task>
 Your task is to evaluate how well the content of a "Document" satisfies the user's intent behind their "Query."
 </Task>
+
+<Notice>
+The "Raw Content" field in the document below may be truncated for efficiency. If you see "...[greater than 500 words truncated]" at the end, it means the full article is longer than what is shown. Do NOT penalize the score because the raw content appears short or incomplete — judge relevance based on the title, the brief content summary, and whatever raw content is available.
+</Notice>
 
 <Guideline>
 Please follow the scoring criteria below:
@@ -173,31 +209,108 @@ The goal is compression by removing noise, not by sacrificing detail.
 </Document>
 """
 
-searching_results_grader = """You are a meticulous Research Analyst and Quality Assurance specialist. Your role is to determine if the current body of research is sufficient to answer a user's query or if more investigation is needed.
+answer_synthesizer_instructions = """You are an expert Research Analyst synthesizing search findings into a comprehensive, well-cited answer.
 
 <Task>
-Your mission is to critically evaluate if the provided `<Existing Information>` comprehensively and definitively answers the user's `<Original Query>`. Based on your assessment, you will decide whether to conclude the research or to generate specific follow-up queries to address information gaps.
+Given new search materials from the current iteration and your previous answer (if any), produce an updated, comprehensive answer to the research question.
+
+**Critical rule on previous answer**: If a `<Previous Answer>` is provided, treat it as the authoritative base. You MUST:
+- Only ADD new information from the new materials; do NOT remove or overwrite factual claims already supported in the previous answer.
+- If new materials contradict the previous answer, note the discrepancy with both citations rather than silently replacing the old fact.
+</Task>
+
+<Answer Format>
+Your answer must:
+1. Open with the most important finding in **bold**.
+2. Be written as coherent prose (not a bullet dump), organized by theme.
+3. **Quantitative data first**: whenever the materials contain specific numbers — revenue figures, percentages, growth rates, subscriber counts, dates, margins, unit volumes — you MUST extract and state them explicitly rather than describing the trend in vague terms. Prefer "revenue grew 37% YoY to $3.6B" over "revenue grew significantly". If multiple sources provide conflicting numbers, cite each separately.
+4. Use inline citations with numbered references: [1], [2], [3], etc.
+5. Do NOT write a `### Sources` section — it will be appended automatically from the
+   Source Registry. Only write [N] inline citations in the body text.
+6. Citation numbers must be consistent: [N] in the text must match [N] in the Source Registry.
+</Answer Format>
+
+<Citation Integrity Rules>
+- ONLY use [N] indices that appear in the <Source Registry> below.
+- Do NOT invent indices outside the registry.
+- NEVER invent source titles, URLs, or dates.
+- If a source lacks a title, use "[Untitled — URL]" format.
+</Citation Integrity Rules>
+
+<Source Hierarchy>
+Prioritize sources in this order when deciding whether to cite a fact:
+
+1. **Primary** (always preferred):
+   - Official regulatory filings: SEC (10-K, 10-Q, 8-K), annual reports, prospectuses
+   - Company investor relations: earnings releases, investor decks, official press releases
+   - Tier-1 financial/general news: Reuters, Bloomberg, Financial Times, Wall Street Journal, New York Times, CNBC, Associated Press
+   - Government and intergovernmental databases: central banks, statistical agencies, regulatory bodies
+   - Peer-reviewed academic research
+
+2. **Secondary** (cite only when primary sources do not cover the specific claim):
+   - Acceptable secondary: established industry data providers (e.g., S&P Global, Tridens, Statista, CB Insights), specialist trade publications with editorial standards, well-known analysis platforms (e.g., Seeking Alpha with analyst by-line, not anonymous posts)
+   - Unacceptable as secondary: personal finance blogs, SEO-optimized "wiki" pages (e.g., Bitget wiki, generic finance wikis), content farms, press release aggregators with no editorial layer
+   - When citing secondary sources, note in the text that the figure is "according to [source]" so the reader understands it is not a primary disclosure
+
+3. **Social media** (last resort — Instagram, Facebook, Reddit, Twitter/X, TikTok, YouTube):
+   - Cite ONLY if the fact appears nowhere in primary or acceptable secondary sources
+   - Always label explicitly in the Sources entry: `[N] [Facebook post] Title — URL`, `[N] [Reddit] Title — URL`
+   - Do NOT use social media to corroborate or reinforce a claim already covered by primary/secondary sources
+
+**Enforcement**: If a primary source and an unacceptable secondary source (e.g., a Bitget wiki page) state the same fact, cite ONLY the primary source. If only an unacceptable secondary source mentions a claim, either omit the claim or flag it explicitly as unverified in the answer text.
+</Source Hierarchy>
+
+<Language>
+Write the answer in Traditional Chinese. Source titles and URLs in ### Sources may remain in their original language.
+</Language>
+
+<Source Registry — authoritative citation reference>
+{source_registry}
+</Source Registry>
+
+Use [N] from this registry for all inline citations. The registry is stable across
+iterations — old indices never change. New sources are appended each round.
+
+<Research Question>
+{question}
+</Research Question>
+
+<Previous Answer (empty on first iteration)>
+{previous_answer}
+</Previous Answer>
+
+<New Search Materials>
+{materials}
+</New Search Materials>
+"""
+
+searching_results_grader = """You are a meticulous Research Analyst and Quality Assurance specialist. Your role is to determine if the current answer is sufficient to comprehensively address the research question, or if more investigation is needed.
+
+<Task>
+Critically evaluate whether the provided `<Current Answer>` comprehensively and definitively answers the `<Research Question>`. Based on your assessment, decide whether to conclude the research or generate specific follow-up queries to address information gaps.
 </Task>
 
 <Evaluation Criteria>
-1.  **Complete ("pass")**: The research is considered complete if the `<Existing Information>` meets these standards:
-    *   **Direct Answer**: It directly and fully addresses the core question of the `<Original Query>`.
-    *   **Sufficient Depth**: It provides enough detail, evidence, and context to be considered a satisfactory answer. No obvious, critical gaps remain.
-    *   **High Confidence**: The information is authoritative and doesn't leave the user with significant ambiguity.
+1.  **Complete ("pass")**: The answer is complete if it:
+    *   **Directly answers** the main question and all embedded sub-questions.
+    *   **Provides sufficient depth**: enough detail, evidence, and context to be satisfactory.
+    *   **Has high confidence**: the information is authoritative with minimal ambiguity.
+    *   **Has proper citations**: key claims are supported by numbered inline citations.
 
-2.  **Incomplete ("fail")**: The research is incomplete if the `<Existing Information>` exhibits any of these issues:
-    *   **Partial Answer**: It only addresses a part of the query or provides a superficial overview.
-    *   **Tangential Information**: It mentions keywords but doesn't address the user's actual intent.
-    *   **Lacks Specificity**: It is too general and lacks the specific data, examples, or explanations needed.
-    *   **Raises New Questions**: The information is a starting point but clearly requires further investigation to be useful.
+2.  **Incomplete ("fail")**: The answer is incomplete if it:
+    *   Only addresses part of the question or provides a superficial overview.
+    *   Mentions keywords but doesn't address the actual intent.
+    *   Is too general and lacks specific data, examples, or explanations.
+    *   Raises new questions that clearly require further investigation.
+    *   Has sub-questions that remain unanswered.
 </Evaluation Criteria>
 
 <Action Protocol>
-1.  **If the research is "pass"**: You will call the feedback tool with `grade="pass"` and an empty list for `follow_up_queries`.
-2.  **If the research is "fail"**:
-    *   You must identify the specific information that is missing.
-    *   You must generate **one or two** highly targeted `follow_up_queries` designed to find the *exact* missing information.
-    *   These queries should be precise and build upon the existing information, not simply repeat or rephrase the original query.
+1.  **If the answer is "pass"**: Call the feedback tool with `grade="pass"` and an empty list for `follow_up_queries`.
+2.  **If the answer is "fail"**:
+    *   Identify the specific information that is missing.
+    *   Generate **one or two** highly targeted `follow_up_queries` designed to find the *exact* missing information.
+    *   These queries should be precise and build upon the existing answer, not simply repeat the original question.
 </Action Protocol>
 
 <Follow-up Query Format Rules>
@@ -211,11 +324,11 @@ Your mission is to critically evaluate if the provided `<Existing Information>` 
 </Language Rules>
 </Follow-up Query Format Rules>
 
-<Original Query>
-{query}
-</Original Query>
+<Research Question>
+{question}
+</Research Question>
 
-<Existing Information>
-{context}
-</Existing Information>
+<Current Answer>
+{answer}
+</Current Answer>
 """
