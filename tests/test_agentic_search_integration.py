@@ -241,3 +241,132 @@ class TestAgenticSearchGraphUrlMemoPropagation:
             f"Expected {_DUP_URL!r} to appear in the answer (from iteration 1), "
             f"but found {occurrences} occurrence(s). answer={answer!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Source registry integration tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+class TestSourceRegistryIntegration:
+    """Verify that source_registry is built from real {title, url} pairs across iterations.
+
+    Asserts:
+    1. Final ``### Sources`` entries contain real ``http`` URLs (not text excerpts).
+    2. A source registered in iteration 1 keeps its ``[N]`` index in the final answer.
+    """
+
+    _FAKE_RESULT = [
+        {
+            "results": [
+                {
+                    "url": "https://example.com/article",
+                    "title": "Example Article",
+                    "content": "CPO reduces power",
+                    "raw_content": "CPO reduces power by 30%.",
+                }
+            ]
+        }
+    ]
+
+    @staticmethod
+    async def _quality_ok(*args, **kwargs):
+        """Async mock for call_llm_async: every result passes quality (score=4)."""
+        mock = MagicMock()
+        mock.tool_calls = [{"args": {"score": 4}}]
+        return mock
+
+    @staticmethod
+    def _mock_resp(**kwargs):
+        m = MagicMock()
+        m.tool_calls = [{"args": kwargs}]
+        return m
+
+    @staticmethod
+    def _make_call_llm(responses: list):
+        """Return a call_llm side_effect that yields responses in order."""
+        it = iter(responses)
+        def _fn(*args, **kwargs):
+            return next(it)
+        return _fn
+
+    def test_full_graph_sources_are_urls(self):
+        """Final answer's ### Sources entries must all contain real http URLs."""
+        import subagent.agentic_search as ag
+        from subagent.agentic_search import agentic_search_graph
+
+        queries_resp = self._mock_resp(queries=["CPO technology"])
+        synth_resp = self._mock_resp(answer="CPO reduces power [1].")
+        grade_resp = self._mock_resp(grade="pass", follow_up_queries=[])
+
+        async def _run():
+            return await agentic_search_graph.ainvoke({
+                "question": "What is CPO?",
+                "url_memo": set(),
+                "source_registry": [],
+                "max_num_iterations": 1,
+            })
+
+        with (
+            patch.object(ag, "selenium_api_search", return_value=self._FAKE_RESULT),
+            patch.object(ag, "call_llm_async", side_effect=self._quality_ok),
+            patch.object(ag, "call_llm", side_effect=self._make_call_llm([queries_resp, synth_resp, grade_resp])),
+        ):
+            final = asyncio.run(_run())
+
+        answer = final["answer"]
+        assert "### Sources" in answer, "finalize_answer must append ### Sources"
+        assert "https://example.com/article" in answer, "Sources must contain real URL, not text excerpt"
+        source_lines = [l for l in answer.split("\n") if l.startswith("- [")]
+        assert source_lines, "At least one source line must be present"
+        for line in source_lines:
+            assert "http" in line, f"Source line missing URL: {line!r}"
+
+    def test_two_iterations_source_index_stable(self):
+        """Source registered as [1] in iteration 1 keeps that index in the final answer."""
+        import subagent.agentic_search as ag
+        from subagent.agentic_search import agentic_search_graph
+
+        iter1_result = [{"results": [
+            {"url": "https://first.com", "title": "First", "content": "c", "raw_content": "r"}
+        ]}]
+        iter2_result = [{"results": [
+            {"url": "https://second.com", "title": "Second", "content": "c", "raw_content": "r"}
+        ]}]
+
+        call_count = {"n": 0}
+
+        def fake_search(queries, raw):
+            call_count["n"] += 1
+            return iter1_result if call_count["n"] == 1 else iter2_result
+
+        queries_resp = self._mock_resp(queries=["test query"])
+        synth1 = self._mock_resp(answer="Iteration 1 answer [1].")
+        grade_fail = self._mock_resp(grade="fail", follow_up_queries=["follow up"])
+        synth2 = self._mock_resp(answer="Updated answer [1][2].")
+        # After iteration 2, budget exhausted → finalize_answer called without grader
+
+        async def _run():
+            return await agentic_search_graph.ainvoke({
+                "question": "Test question",
+                "url_memo": set(),
+                "source_registry": [],
+                "max_num_iterations": 2,
+            })
+
+        with (
+            patch.object(ag, "selenium_api_search", side_effect=fake_search),
+            patch.object(ag, "call_llm_async", side_effect=self._quality_ok),
+            patch.object(ag, "call_llm", side_effect=self._make_call_llm([queries_resp, synth1, grade_fail, synth2])),
+        ):
+            final = asyncio.run(_run())
+
+        answer = final["answer"]
+        assert "https://first.com" in answer, "[1] source from iteration 1 must appear in final Sources"
+        assert "https://second.com" in answer, "[2] source from iteration 2 must appear in final Sources"
+        # [1] must still refer to first.com (stable index across iterations)
+        source_lines = [l for l in answer.split("\n") if l.startswith("- [")]
+        line_1 = next((l for l in source_lines if "- [1]" in l), "")
+        line_2 = next((l for l in source_lines if "- [2]" in l), "")
+        assert "first.com" in line_1, f"[1] must remain https://first.com; got: {line_1!r}"
+        assert "second.com" in line_2, f"[2] must be https://second.com; got: {line_2!r}"
