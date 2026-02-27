@@ -491,6 +491,72 @@ class TestSynthesizeAnswer:
 
 
 # ---------------------------------------------------------------------------
+# source_registry building in aggregate_final_results
+# ---------------------------------------------------------------------------
+class TestAggregateRegistry:
+    """Unit tests for source_registry building in aggregate_final_results."""
+
+    def _make_compressed(self, results_per_query):
+        """Build compressed_web_results structure from list of lists of dicts."""
+        return [{"results": results} for results in results_per_query]
+
+    def test_builds_registry_from_results(self):
+        """Registry entries have correct title and url from compressed results."""
+        with patch("subagent.agentic_search.web_search_deduplicate_and_format_sources", return_value=""):
+            state = {
+                "compressed_web_results": self._make_compressed([[
+                    {"url": "http://a.com", "title": "Article A", "content": "", "raw_content": ""},
+                ]]),
+                "source_registry": [],
+                "queries": ["q"],
+            }
+            result = aggregate_final_results(state)
+        assert result["source_registry"] == [{"title": "Article A", "url": "http://a.com"}]
+
+    def test_within_iteration_dedup(self):
+        """Same URL from two queries in one round → only one registry entry."""
+        with patch("subagent.agentic_search.web_search_deduplicate_and_format_sources", return_value=""):
+            state = {
+                "compressed_web_results": self._make_compressed([
+                    [{"url": "http://dup.com", "title": "Dup", "content": "", "raw_content": ""}],
+                    [{"url": "http://dup.com", "title": "Dup", "content": "", "raw_content": ""}],
+                ]),
+                "source_registry": [],
+                "queries": ["q1", "q2"],
+            }
+            result = aggregate_final_results(state)
+        assert len(result["source_registry"]) == 1
+
+    def test_cross_iteration_dedup(self):
+        """URL already in registry (from a prior iteration) is not re-appended."""
+        with patch("subagent.agentic_search.web_search_deduplicate_and_format_sources", return_value=""):
+            state = {
+                "compressed_web_results": self._make_compressed([[
+                    {"url": "http://already.com", "title": "Old", "content": "", "raw_content": ""},
+                    {"url": "http://new.com", "title": "New", "content": "", "raw_content": ""},
+                ]]),
+                "source_registry": [{"title": "Old", "url": "http://already.com"}],
+                "queries": ["q"],
+            }
+            result = aggregate_final_results(state)
+        assert result["source_registry"] == [{"title": "New", "url": "http://new.com"}]
+
+    def test_non_http_urls_excluded(self):
+        """Non-http URLs (e.g., _part1 chunk keys) are not added to registry."""
+        with patch("subagent.agentic_search.web_search_deduplicate_and_format_sources", return_value=""):
+            state = {
+                "compressed_web_results": self._make_compressed([[
+                    {"url": "_part1_key", "title": "Chunk", "content": "", "raw_content": ""},
+                    {"url": "http://real.com", "title": "Real", "content": "", "raw_content": ""},
+                ]]),
+                "source_registry": [],
+                "queries": ["q"],
+            }
+            result = aggregate_final_results(state)
+        assert result["source_registry"] == [{"title": "Real", "url": "http://real.com"}]
+
+
+# ---------------------------------------------------------------------------
 # aggregate_final_results: materials reset each round
 # ---------------------------------------------------------------------------
 class TestAggregateFinalResultsMaterialsReset:

@@ -369,10 +369,23 @@ async def compress_raw_content(state: AgenticSearchState):
 
 
 def aggregate_final_results(state: AgenticSearchState):
-    """Format current iteration's search results into materials (reset each round)."""
+    """Format current iteration's search results into materials and update source registry."""
     compressed_web_results = state["compressed_web_results"]
     materials = web_search_deduplicate_and_format_sources(compressed_web_results, True)
-    return {"materials": materials}
+
+    # Layer 2 dedup: guard against URLs already in the registry
+    existing_urls = {e["url"] for e in state.get("source_registry", [])}
+    # Within-iteration dedup: same URL from multiple queries in this round
+    seen_this_round: set[str] = set()
+    new_entries: list[dict] = []
+    for query_results in compressed_web_results:
+        for result in query_results["results"]:
+            url = result.get("url", "")
+            if url and url.startswith("http") and url not in existing_urls and url not in seen_this_round:
+                new_entries.append({"title": result.get("title", ""), "url": url})
+                seen_this_round.add(url)
+
+    return {"materials": materials, "source_registry": new_entries}
 
 
 def synthesize_answer(state: AgenticSearchState):
