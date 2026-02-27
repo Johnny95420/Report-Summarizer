@@ -712,3 +712,32 @@ class TestFormatSourcesSection:
         """Empty answer string returns unchanged."""
         from subagent.agentic_search import _format_sources_section
         assert _format_sources_section("", [{"title": "T", "url": "http://x.com"}]) == ""
+
+    def test_llm_written_sources_section_stripped_before_extraction(self):
+        """If LLM disobeys and writes its own ### Sources, those [N] must not
+        pollute the cited set — only body inline citations count."""
+        from subagent.agentic_search import _format_sources_section
+        registry = self._make_registry(
+            "http://a.com", "http://b.com", "http://c.com",
+            "http://d.com", "http://e.com",
+        )
+        # LLM body cites only [2][3]; LLM also wrote its own Sources with [1]-[5]
+        answer = (
+            "Body text citing [2] and [3].\n\n"
+            "### Sources\n"
+            "- [1] Title 1 — http://a.com\n"
+            "- [2] Title 2 — http://b.com\n"
+            "- [3] Title 3 — http://c.com\n"
+            "- [4] Title 4 — http://d.com\n"
+            "- [5] Title 5 — http://e.com\n"
+        )
+        result = _format_sources_section(answer, registry)
+        source_lines = [l for l in result.split("\n") if l.startswith("- [")]
+        # Only 2 sources should appear (the actually-cited [2] and [3])
+        assert len(source_lines) == 2, f"Expected 2 source lines, got {len(source_lines)}: {source_lines}"
+        # They should be renumbered [1] and [2]
+        assert any("- [1]" in l for l in source_lines)
+        assert any("- [2]" in l for l in source_lines)
+        assert not any("- [3]" in l for l in source_lines)
+        assert not any("- [4]" in l for l in source_lines)
+        assert not any("- [5]" in l for l in source_lines)

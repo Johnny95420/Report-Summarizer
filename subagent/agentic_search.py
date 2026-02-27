@@ -67,7 +67,11 @@ def _format_sources_section(answer: str, registry: list[dict]) -> str:
     if not registry or not answer:
         return answer
 
-    cited = sorted(set(int(m) for m in re.findall(r'\[(\d+)\]', answer)))
+    # Strip any LLM-written ### Sources section before extracting citations,
+    # so those [N] numbers don't pollute the cited set.
+    body = re.split(r'\n+###\s*Sources\b', answer)[0].rstrip()
+
+    cited = sorted(set(int(m) for m in re.findall(r'\[(\d+)\]', body)))
     if not cited:
         return answer
 
@@ -75,7 +79,7 @@ def _format_sources_section(answer: str, registry: list[dict]) -> str:
     renumbered = re.sub(
         r'\[(\d+)\]',
         lambda m: f"[{remap.get(int(m.group(1)), int(m.group(1)))}]",
-        answer,
+        body,
     )
 
     lines = ["### Sources"]
@@ -556,6 +560,9 @@ if __name__ == "__main__":
 
     print("\n[answer]\n")
     print(final_state.get("answer", "(no answer)"))
+    print("\n[source_registry]")
+    for i, entry in enumerate(final_state.get("source_registry", []), 1):
+        print(f"  [{i}] {entry.get('title', '')} — {entry.get('url', '')}")
     print("\n[url_memo]")
     for url in sorted(final_state.get("url_memo", [])):
         print(f"  {url}")
