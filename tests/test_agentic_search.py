@@ -582,3 +582,69 @@ def test_compress_llm_called_for_long_content():
         asyncio.run(compress_raw_content(state))
     # LLM must have been called exactly once
     mock_llm.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _format_sources_section pure function
+# ---------------------------------------------------------------------------
+class TestFormatSourcesSection:
+    """Unit tests for _format_sources_section pure function."""
+
+    def _make_registry(self, *urls):
+        return [{"title": f"Title {i+1}", "url": url} for i, url in enumerate(urls)]
+
+    def test_renumbers_sparse_citations(self):
+        """[3][19] in text → renumbered [1][2]; Sources section uses new numbers."""
+        from subagent.agentic_search import _format_sources_section
+        registry = self._make_registry(
+            "http://a.com", "http://b.com", "http://c.com",
+            *[f"http://x{i}.com" for i in range(15)],  # 15 items → s.com is at index 18, citation [19]
+            "http://s.com",
+        )
+        answer = "Claim A [3]. Claim B [19]."
+        result = _format_sources_section(answer, registry)
+        assert "[1]" in result
+        assert "[2]" in result
+        assert "[3]" not in result.split("### Sources")[0]  # original [3] gone from body
+        assert "[19]" not in result
+        assert "http://c.com" in result
+        assert "http://s.com" in result
+
+    def test_no_citations_returns_original(self):
+        """Answer with no [N] references is returned unchanged."""
+        from subagent.agentic_search import _format_sources_section
+        registry = self._make_registry("http://a.com")
+        answer = "Answer with no citations."
+        assert _format_sources_section(answer, registry) == answer
+
+    def test_empty_registry_returns_original(self):
+        """Empty registry → original answer returned unchanged."""
+        from subagent.agentic_search import _format_sources_section
+        answer = "Claim [1]."
+        assert _format_sources_section(answer, []) == answer
+
+    def test_out_of_range_index_skipped(self):
+        """[N] beyond registry length → that entry skipped in Sources, no crash."""
+        from subagent.agentic_search import _format_sources_section
+        registry = self._make_registry("http://a.com")  # only index 1
+        answer = "Claim [1]. Claim [5]."
+        result = _format_sources_section(answer, registry)
+        assert "http://a.com" in result
+        assert "### Sources" in result
+        # [5] is out of range — should not appear in Sources
+        lines = result.split("\n")
+        source_lines = [l for l in lines if l.startswith("- [")]
+        assert len(source_lines) == 1
+
+    def test_sources_section_format(self):
+        """Sources section format: '- [N] Title — URL'."""
+        from subagent.agentic_search import _format_sources_section
+        registry = [{"title": "My Article", "url": "https://example.com/art"}]
+        answer = "See [1]."
+        result = _format_sources_section(answer, registry)
+        assert "- [1] My Article — https://example.com/art" in result
+
+    def test_empty_answer_returns_empty(self):
+        """Empty answer string returns unchanged."""
+        from subagent.agentic_search import _format_sources_section
+        assert _format_sources_section("", [{"title": "T", "url": "http://x.com"}]) == ""

@@ -2,6 +2,7 @@ import asyncio
 import copy
 import logging
 import pathlib
+import re
 import sys
 
 # Ensure project root is on sys.path when run as a script (python subagent/agentic_search.py)
@@ -50,6 +51,40 @@ console_handler.setLevel(logging.ERROR)
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
+
+
+def _format_sources_section(answer: str, registry: list[dict]) -> str:
+    """Re-number [N] citations sequentially and append ### Sources from registry.
+
+    Args:
+        answer: Answer body with [N] inline citations but no ### Sources section.
+        registry: Ordered list of {title, url}; index+1 = citation number.
+
+    Returns:
+        Answer with citations renumbered 1-based and ### Sources appended.
+        Returns original answer unchanged if registry is empty or no citations found.
+    """
+    if not registry or not answer:
+        return answer
+
+    cited = sorted(set(int(m) for m in re.findall(r'\[(\d+)\]', answer)))
+    if not cited:
+        return answer
+
+    remap = {orig: new for new, orig in enumerate(cited, 1)}
+    renumbered = re.sub(
+        r'\[(\d+)\]',
+        lambda m: f"[{remap.get(int(m.group(1)), int(m.group(1)))}]",
+        answer,
+    )
+
+    lines = ["### Sources"]
+    for orig in cited:
+        idx = orig - 1  # registry is 0-based
+        if 0 <= idx < len(registry):
+            lines.append(f"- [{remap[orig]}] {registry[idx]['title']} — {registry[idx]['url']}")
+
+    return renumbered + "\n\n" + "\n".join(lines)
 
 
 def select_model_based_on_tokens(content: str, token_threshold: int = 4096) -> tuple[str, str]:
@@ -126,8 +161,9 @@ def get_searching_budget(state: AgenticSearchState):
 def generate_queries_from_question(state: AgenticSearchState):
     """Generate keyword-based search queries from the research question."""
     question = state["question"]
+    num_queries = state.get("num_queries") or 3
 
-    system_instruction = query_writer_instructions.format(question=question)
+    system_instruction = query_writer_instructions.format(question=question, num_queries=num_queries)
     result = call_llm(
         MODEL_NAME,
         BACKUP_MODEL_NAME,
@@ -399,8 +435,11 @@ def check_searching_results(state: AgenticSearchState):
     if feedback["grade"] == "pass":
         return Command(goto=END)
     else:
+        follow_up_queries = feedback["follow_up_queries"]
+        if isinstance(follow_up_queries, str):
+            follow_up_queries = [follow_up_queries]
         return Command(
-            update={"followed_up_queries": feedback["follow_up_queries"]},
+            update={"followed_up_queries": follow_up_queries},
             goto="perform_web_search",
         )
 
