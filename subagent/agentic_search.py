@@ -23,7 +23,10 @@ VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
 BACKUP_VERIFY_MODEL_NAME = config["BACKUP_VERIFY_MODEL_NAME"]
 
 from langchain_community.callbacks.infino_callback import get_num_tokens
+from langchain_community.vectorstores import Chroma
+from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
@@ -36,6 +39,7 @@ from Tools.tools import (
     searching_grader_formatter,
     summary_formatter,
 )
+from Utils.embeddings import get_embedding_model
 from Utils.utils import (
     call_llm,
     call_llm_async,
@@ -476,6 +480,49 @@ def finalize_answer(state: AgenticSearchState) -> dict:
     )}
 
 
+_CHUNK_THRESHOLD = 5000  # chars; articles shorter than this pass through unchanged
+
+
+def chunk_large_articles(state: AgenticSearchState) -> dict:
+    """Replace long raw_content with query-relevant chunks (per-article isolation).
+
+    Each article longer than _CHUNK_THRESHOLD chars is split into chunks, embedded
+    into an ephemeral in-memory Chroma collection, and queried with the search query.
+    The top-k most relevant chunks replace the original result as independent entries
+    (same url and title, replaced raw_content). On any error, the article is truncated
+    to _CHUNK_THRESHOLD chars instead of passing potentially huge content downstream.
+    """
+    followed_up_queries = state.get("followed_up_queries", [])
+    queries = followed_up_queries if followed_up_queries else state["queries"]
+    filtered_web_results = state["filtered_web_results"]
+
+    embeddings = get_embedding_model()
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50,
+        separators=["\n\n\n", "\n\n", "\n", ""],
+    )
+
+    output = [{"results": []} for _ in filtered_web_results]
+    for q_idx, (query, query_results) in enumerate(zip(queries, filtered_web_results)):
+        for result in query_results["results"]:
+            raw = result.get("raw_content") or ""
+            if len(raw) < _CHUNK_THRESHOLD:
+                output[q_idx]["results"].append(result)
+                continue
+            try:
+                docs = [Document(chunk) for chunk in splitter.split_text(raw)]
+                vs = Chroma.from_documents(docs, embeddings)  # in-memory: no persist_directory
+                hits = vs.similarity_search(query, k=5)
+                for hit in hits:
+                    output[q_idx]["results"].append({**result, "raw_content": hit.page_content})
+            except Exception as e:
+                logger.error("chunk_large_articles failed for '%s': %s", result.get("url"), e)
+                output[q_idx]["results"].append({**result, "raw_content": raw[:_CHUNK_THRESHOLD]})
+
+    return {"filtered_web_results": output}
+
+
 class AgenticSearchGraphBuilder:
     def __init__(self):
         self._graph = None
@@ -487,6 +534,7 @@ class AgenticSearchGraphBuilder:
             builder.add_node("generate_queries_from_question", generate_queries_from_question)
             builder.add_node("perform_web_search", perform_web_search)
             builder.add_node("filter_and_format_results", filter_and_format_results)
+            builder.add_node("chunk_large_articles", chunk_large_articles)
             builder.add_node("compress_raw_content", compress_raw_content)
             builder.add_node("aggregate_final_results", aggregate_final_results)
             builder.add_node("synthesize_answer", synthesize_answer)
@@ -497,7 +545,8 @@ class AgenticSearchGraphBuilder:
             builder.add_edge("get_searching_budget", "generate_queries_from_question")
             builder.add_edge("generate_queries_from_question", "perform_web_search")
             builder.add_edge("perform_web_search", "filter_and_format_results")
-            builder.add_edge("filter_and_format_results", "compress_raw_content")
+            builder.add_edge("filter_and_format_results", "chunk_large_articles")
+            builder.add_edge("chunk_large_articles", "compress_raw_content")
             builder.add_edge("compress_raw_content", "aggregate_final_results")
             builder.add_edge("aggregate_final_results", "synthesize_answer")
             builder.add_edge("synthesize_answer", "check_searching_results")

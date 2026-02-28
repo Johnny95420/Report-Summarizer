@@ -855,3 +855,117 @@ class TestGradeSectionContentFallback:
             cmd = _grade_section_content(self._make_section(), self._make_state())
 
         assert cmd.goto == END
+
+
+# ---------------------------------------------------------------------------
+# chunk_large_articles node
+# ---------------------------------------------------------------------------
+class TestChunkLargeArticles:
+    """Tests for chunk_large_articles node."""
+
+    def _state(self, results_per_query: list[list[dict]]) -> dict:
+        return {
+            "queries": [f"q{i}" for i in range(len(results_per_query))],
+            "followed_up_queries": [],
+            "filtered_web_results": [{"results": items} for items in results_per_query],
+        }
+
+    def test_short_article_passes_through_unchanged(self):
+        """Articles with raw_content shorter than threshold pass through unchanged."""
+        from subagent.agentic_search import chunk_large_articles
+
+        result_in = {"url": "http://x.com", "title": "T", "content": "C", "raw_content": "short"}
+        state = self._state([[result_in]])
+
+        with patch("subagent.agentic_search.get_embedding_model"):
+            out = chunk_large_articles(state)
+
+        results = out["filtered_web_results"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["raw_content"] == "short"
+
+    def test_long_article_replaced_by_chunks(self):
+        """Article with raw_content >= threshold is replaced by top-k chunk entries."""
+        from subagent.agentic_search import chunk_large_articles
+
+        long_raw = "word " * 1500  # > 5000 chars
+        result_in = {"url": "http://x.com", "title": "T", "content": "C", "raw_content": long_raw}
+        state = self._state([[result_in]])
+
+        fake_doc = MagicMock()
+        fake_doc.page_content = "relevant chunk"
+        mock_vs = MagicMock()
+        mock_vs.similarity_search.return_value = [fake_doc, fake_doc]
+
+        with (
+            patch("subagent.agentic_search.get_embedding_model"),
+            patch("subagent.agentic_search.Chroma.from_documents", return_value=mock_vs),
+        ):
+            out = chunk_large_articles(state)
+
+        results = out["filtered_web_results"][0]["results"]
+        # Original long entry replaced by 2 chunk entries
+        assert len(results) == 2
+        assert all(r["raw_content"] == "relevant chunk" for r in results)
+        # url and title preserved from original result
+        assert all(r["url"] == "http://x.com" for r in results)
+        assert all(r["title"] == "T" for r in results)
+
+    def test_fallback_on_chroma_error_truncates_to_threshold(self):
+        """When Chroma raises, fallback truncates raw_content to _CHUNK_THRESHOLD chars."""
+        from subagent.agentic_search import chunk_large_articles, _CHUNK_THRESHOLD
+
+        long_raw = "x" * 20000
+        result_in = {"url": "http://x.com", "title": "T", "content": "C", "raw_content": long_raw}
+        state = self._state([[result_in]])
+
+        with (
+            patch("subagent.agentic_search.get_embedding_model"),
+            patch("subagent.agentic_search.Chroma.from_documents", side_effect=RuntimeError("OOM")),
+        ):
+            out = chunk_large_articles(state)
+
+        results = out["filtered_web_results"][0]["results"]
+        assert len(results) == 1
+        assert len(results[0]["raw_content"]) == _CHUNK_THRESHOLD
+
+    def test_none_raw_content_passes_through(self):
+        """Result with raw_content=None passes through unchanged without crashing."""
+        from subagent.agentic_search import chunk_large_articles
+
+        result_in = {"url": "http://x.com", "title": "T", "content": "C", "raw_content": None}
+        state = self._state([[result_in]])
+
+        with patch("subagent.agentic_search.get_embedding_model"):
+            out = chunk_large_articles(state)
+
+        results = out["filtered_web_results"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["raw_content"] is None
+
+    def test_followed_up_queries_used_as_search_context(self):
+        """When followed_up_queries is non-empty, it is used instead of queries for similarity_search."""
+        from subagent.agentic_search import chunk_large_articles
+
+        long_raw = "word " * 1500
+        state = {
+            "queries": ["original query"],
+            "followed_up_queries": ["follow up query"],
+            "filtered_web_results": [{"results": [
+                {"url": "http://x.com", "title": "T", "content": "C", "raw_content": long_raw}
+            ]}],
+        }
+
+        fake_doc = MagicMock()
+        fake_doc.page_content = "chunk"
+        mock_vs = MagicMock()
+        mock_vs.similarity_search.return_value = [fake_doc]
+
+        with (
+            patch("subagent.agentic_search.get_embedding_model"),
+            patch("subagent.agentic_search.Chroma.from_documents", return_value=mock_vs),
+        ):
+            out = chunk_large_articles(state)
+
+        # similarity_search called with the follow-up query, not original
+        mock_vs.similarity_search.assert_called_once_with("follow up query", k=5)
