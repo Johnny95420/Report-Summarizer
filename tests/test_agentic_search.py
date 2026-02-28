@@ -5,12 +5,14 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
+from langgraph.graph import END
 from subagent.agentic_search import (
     aggregate_final_results,
     check_search_quality_async,
     check_searching_results,
     compress_raw_content,
     filter_and_format_results,
+    finalize_answer,
     generate_queries_from_question,
     perform_web_search,
     queries_rewriter,
@@ -741,3 +743,115 @@ class TestFormatSourcesSection:
         assert not any("- [3]" in l for l in source_lines)
         assert not any("- [4]" in l for l in source_lines)
         assert not any("- [5]" in l for l in source_lines)
+
+
+# ---------------------------------------------------------------------------
+# finalize_answer node
+# ---------------------------------------------------------------------------
+class TestFinalizeAnswer:
+    """Unit tests for the finalize_answer node function."""
+
+    def test_finalize_answer_appends_sources_section(self):
+        """State with answer containing [1] citation and a one-entry registry
+        should produce output that contains '### Sources'."""
+        state = {
+            "answer": "Tesla's revenue is strong. [1]",
+            "source_registry": [{"title": "Reuters", "url": "http://reuters.com"}],
+        }
+        result = finalize_answer(state)
+        assert "### Sources" in result["answer"]
+
+    def test_finalize_answer_empty_answer_returns_empty(self):
+        """When answer is empty string, output answer must also be empty string."""
+        state = {
+            "answer": "",
+            "source_registry": [{"title": "Reuters", "url": "http://reuters.com"}],
+        }
+        result = finalize_answer(state)
+        assert result["answer"] == ""
+
+    def test_finalize_answer_empty_registry_returns_original(self):
+        """When registry is empty, the original answer is returned unchanged."""
+        original_answer = "Tesla revenue grew [1] significantly."
+        state = {
+            "answer": original_answer,
+            "source_registry": [],
+        }
+        result = finalize_answer(state)
+        assert result["answer"] == original_answer
+
+    def test_finalize_answer_missing_answer_key(self):
+        """State with no 'answer' key must not crash and must return answer=''."""
+        state = {
+            "source_registry": [{"title": "Reuters", "url": "http://reuters.com"}],
+        }
+        result = finalize_answer(state)
+        assert result["answer"] == ""
+
+
+# ---------------------------------------------------------------------------
+# _grade_section_content fallback behaviour
+# ---------------------------------------------------------------------------
+class TestGradeSectionContentFallback:
+    """Unit tests for _grade_section_content in report_writer.py.
+
+    Each test patches report_writer._call_llm_with_retry directly so that
+    no real LLM calls are made and no network connectivity is required.
+    """
+
+    def _make_section(self):
+        """Return a minimal Section object for testing."""
+        from State.state import Section
+
+        return Section(
+            name="Test Section",
+            description="A section about test topics.",
+            content="Sample section content.",
+            research=True,
+        )
+
+    def _make_state(self):
+        """Return a minimal SectionState dict for testing."""
+        return {
+            "search_iterations": 0,
+            "question_history": [],
+        }
+
+    def test_empty_tool_calls_routes_to_generate_question(self):
+        """When feedback has empty tool_calls list, grade defaults to 'fail'
+        so the Command routes to 'generate_question'."""
+        from report_writer import _grade_section_content
+
+        mock_feedback = MagicMock()
+        mock_feedback.tool_calls = []  # empty → feedback_data = {} → grade defaults to "fail"
+
+        with patch("report_writer._call_llm_with_retry", return_value=mock_feedback):
+            cmd = _grade_section_content(self._make_section(), self._make_state())
+
+        assert cmd.goto == "generate_question"
+
+    def test_missing_grade_key_defaults_to_fail(self):
+        """When tool_calls[0]['args'] has no 'grade' key, grade defaults to
+        'fail' and the Command routes to 'generate_question'."""
+        from report_writer import _grade_section_content
+
+        mock_feedback = MagicMock()
+        mock_feedback.tool_calls = [{"args": {"weakness": "missing data gap"}}]
+
+        with patch("report_writer._call_llm_with_retry", return_value=mock_feedback):
+            cmd = _grade_section_content(self._make_section(), self._make_state())
+
+        assert cmd.goto == "generate_question"
+
+    def test_missing_weakness_key_defaults_to_empty(self):
+        """When tool_calls[0]['args'] has grade='pass' but no 'weakness' key,
+        weakness defaults to '' and the Command routes to END (pass path)."""
+        from report_writer import _grade_section_content
+
+        mock_feedback = MagicMock()
+        mock_feedback.tool_calls = [{"args": {"grade": "pass"}}]
+
+        with patch("report_writer._call_llm_with_retry", return_value=mock_feedback):
+            cmd = _grade_section_content(self._make_section(), self._make_state())
+
+        assert cmd.goto == END

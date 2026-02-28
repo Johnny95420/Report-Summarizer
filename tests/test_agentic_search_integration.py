@@ -370,3 +370,117 @@ class TestSourceRegistryIntegration:
         line_2 = next((l for l in source_lines if "- [2]" in l), "")
         assert "first.com" in line_1, f"[1] must remain https://first.com; got: {line_1!r}"
         assert "second.com" in line_2, f"[2] must be https://second.com; got: {line_2!r}"
+
+
+# ---------------------------------------------------------------------------
+# finalize_answer node integration tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+class TestFinalizeAnswerNode:
+    """Verify that finalize_answer appends ### Sources using real source_registry entries.
+
+    The test runs the full agentic_search_graph with max_num_iterations=1 so
+    the budget guard in check_searching_results fires immediately and routes to
+    finalize_answer without calling the grader LLM.  The assertions confirm
+    that finalize_answer stitches the real URL from source_registry into the
+    final answer's ### Sources block.
+    """
+
+    _ARTICLE_URL = "https://test.com/article"
+    _ARTICLE_TITLE = "Test Article"
+
+    _FAKE_RESULT = [
+        {
+            "results": [
+                {
+                    "url": _ARTICLE_URL,
+                    "title": _ARTICLE_TITLE,
+                    "content": "Test content about the topic.",
+                    "raw_content": "Test raw content about the topic.",
+                }
+            ]
+        }
+    ]
+
+    @staticmethod
+    async def _quality_ok(*args, **kwargs):
+        """Async mock for call_llm_async: every result passes quality check (score=4)."""
+        mock = MagicMock()
+        mock.tool_calls = [{"args": {"score": 4}}]
+        return mock
+
+    @staticmethod
+    def _mock_resp(**kwargs):
+        m = MagicMock()
+        m.tool_calls = [{"args": kwargs}]
+        return m
+
+    @staticmethod
+    def _make_call_llm(responses: list):
+        """Return a call_llm side_effect that yields responses in order."""
+        it = iter(responses)
+
+        def _fn(*args, **kwargs):
+            return next(it)
+
+        return _fn
+
+    def test_finalize_answer_appends_sources_in_full_graph(self):
+        """finalize_answer appends ### Sources with the real article URL.
+
+        With max_num_iterations=1 the budget guard in check_searching_results
+        short-circuits to finalize_answer after the first search cycle, so the
+        searching_grader_formatter is never invoked.  The call_llm sequence is:
+          1. queries_formatter   — generate_queries_from_question
+          2. answer_formatter    — synthesize_answer (answer body with [1] citation)
+
+        finalize_answer then appends ### Sources from source_registry without
+        any additional LLM call.
+        """
+        import subagent.agentic_search as ag
+        from subagent.agentic_search import agentic_search_graph
+
+        queries_resp = self._mock_resp(queries=["test query"])
+        # Answer body must contain [1] so _format_sources_section finds a citation to emit.
+        answer_resp = self._mock_resp(answer="Answer text [1].")
+
+        async def _run():
+            return await agentic_search_graph.ainvoke({
+                "question": "What is the topic?",
+                "url_memo": set(),
+                "source_registry": [],
+                "max_num_iterations": 1,
+            })
+
+        with (
+            patch.object(ag, "selenium_api_search", return_value=self._FAKE_RESULT),
+            patch.object(ag, "call_llm_async", side_effect=self._quality_ok),
+            patch.object(
+                ag,
+                "call_llm",
+                side_effect=self._make_call_llm([queries_resp, answer_resp]),
+            ),
+        ):
+            final_state = asyncio.run(_run())
+
+        answer = final_state["answer"]
+
+        # 1. finalize_answer must append the ### Sources block.
+        assert "### Sources" in answer, (
+            "finalize_answer must append ### Sources to the answer; "
+            f"got: {answer!r}"
+        )
+
+        # 2. The real article URL must appear in the Sources block.
+        assert self._ARTICLE_URL in answer, (
+            f"Expected {self._ARTICLE_URL!r} to appear in the final answer; "
+            f"got: {answer!r}"
+        )
+
+        # 3. source_registry must contain at least one entry with the article URL.
+        registry = final_state.get("source_registry", [])
+        assert any(entry.get("url") == self._ARTICLE_URL for entry in registry), (
+            f"source_registry must contain an entry with url={self._ARTICLE_URL!r}; "
+            f"got: {registry!r}"
+        )
