@@ -906,7 +906,10 @@ class TestChunkLargeArticles:
         results = out["filtered_web_results"][0]["results"]
         # Chunks joined into one entry — URL unchanged, no deduplication risk
         assert len(results) == 1
-        assert results[0]["raw_content"] == "relevant chunk\n\n---\n\nrelevant chunk"
+        raw = results[0]["raw_content"]
+        assert raw.startswith("[RAG Retrieved Chunks]")
+        assert "Chunk 1:\nrelevant chunk" in raw
+        assert "Chunk 2:\nrelevant chunk" in raw
         assert results[0]["url"] == "http://x.com"
         assert results[0]["title"] == "T"
         # Collection must be explicitly released after each article

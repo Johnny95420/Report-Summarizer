@@ -520,7 +520,10 @@ def chunk_large_articles(state: AgenticSearchState) -> dict:
                 if not hits:
                     output[q_idx]["results"].append({**result, "raw_content": raw[:_CHUNK_THRESHOLD]})
                 else:
-                    joined = "\n\n---\n\n".join(hit.page_content for hit in hits)
+                    chunk_blocks = "\n\n".join(
+                        f"Chunk {i}:\n{hit.page_content}" for i, hit in enumerate(hits, 1)
+                    )
+                    joined = f"[RAG Retrieved Chunks]\n\n{chunk_blocks}"
                     output[q_idx]["results"].append({**result, "raw_content": joined})
             except Exception as e:
                 logger.error("chunk_large_articles failed for '%s': %s", result.get("url"), e)
