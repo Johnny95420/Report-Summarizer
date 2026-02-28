@@ -15,8 +15,6 @@ from urllib3.util.retry import Retry
 
 from State.state import Section
 
-host = os.environ.get("SEARCH_HOST", None)
-port = os.environ.get("SEARCH_PORT", None)
 tavily_client = TavilyClient()
 
 
