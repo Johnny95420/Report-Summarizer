@@ -72,10 +72,10 @@ from Tools.tools import (
 from Utils.utils import (
     call_llm,
     call_llm_async,
+    call_search_engine,
     format_human_feedback,
     format_search_results_with_metadata,
     format_sections,
-    selenium_api_search,
     track_expanded_context,
     web_search_deduplicate_and_format_sources,
 )
@@ -244,7 +244,7 @@ def _perform_planner_search(queries: list[str], configurable: dict) -> str:
         source_str = format_search_results_with_metadata(results)
 
     if use_web:
-        web_results = selenium_api_search(queries, False)
+        web_results = call_search_engine(queries, False)
         source_str2 = web_search_deduplicate_and_format_sources(web_results, False)
         source_str = source_str + "===\n\n" + source_str2
 

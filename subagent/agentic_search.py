@@ -39,7 +39,7 @@ from Tools.tools import (
 from Utils.utils import (
     call_llm,
     call_llm_async,
-    selenium_api_search,
+    call_search_engine,
     web_search_deduplicate_and_format_sources,
 )
 
@@ -202,7 +202,7 @@ def perform_web_search(state: AgenticSearchState):
         queries = state["queries"]
         logger.info(f"Performing web search for queries: {queries}")
 
-    web_results = selenium_api_search(queries, True)
+    web_results = call_search_engine(queries, True)
     dedup_results = []
     for results in web_results:
         dedup_results.append({"results": []})

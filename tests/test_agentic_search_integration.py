@@ -121,7 +121,7 @@ def _make_perform_web_search_wrapper(real_fn, max_iter: int):
     propagate the test-controlled budget into live state without requiring graph
     recompilation.
 
-    ``selenium_api_search`` is patched at the outer ``with`` level so that it
+    ``call_search_engine`` is patched at the outer ``with`` level so that it
     is already replaced by the time ``real_fn`` executes.
     """
 
@@ -156,7 +156,7 @@ class TestAgenticSearchGraphUrlMemoPropagation:
     The test asserts three things that only hold if LangGraph propagates the
     set correctly:
     1. ``_DUP_URL`` appears in the final ``url_memo``.
-    2. ``selenium_api_search`` is called exactly twice (one per iteration).
+    2. ``call_search_engine`` is called exactly twice (one per iteration).
     3. ``_DUP_URL`` appears exactly once in the final ``answer``
        (deduplication worked — iteration 2 contributed no new results for that URL).
     """
@@ -209,7 +209,7 @@ class TestAgenticSearchGraphUrlMemoPropagation:
             with (
                 patch.object(
                     ag,
-                    "selenium_api_search",
+                    "call_search_engine",
                     return_value=_FAKE_SEARCH_RESPONSE,
                 ) as mock_search,
                 patch.object(ag, "call_llm_async", side_effect=_fake_call_llm_async),
@@ -227,9 +227,9 @@ class TestAgenticSearchGraphUrlMemoPropagation:
             "got: " + repr(final_state["url_memo"])
         )
 
-        # 2. One selenium_api_search call per iteration = 2 total.
+        # 2. One call_search_engine call per iteration = 2 total.
         assert mock_search.call_count == 2, (
-            "Expected 2 selenium_api_search calls (one per iteration), "
+            "Expected 2 call_search_engine calls (one per iteration), "
             f"got {mock_search.call_count}"
         )
 
@@ -308,7 +308,7 @@ class TestSourceRegistryIntegration:
             })
 
         with (
-            patch.object(ag, "selenium_api_search", return_value=self._FAKE_RESULT),
+            patch.object(ag, "call_search_engine", return_value=self._FAKE_RESULT),
             patch.object(ag, "call_llm_async", side_effect=self._quality_ok),
             patch.object(ag, "call_llm", side_effect=self._make_call_llm([queries_resp, synth_resp, grade_resp])),
         ):
@@ -355,7 +355,7 @@ class TestSourceRegistryIntegration:
             })
 
         with (
-            patch.object(ag, "selenium_api_search", side_effect=fake_search),
+            patch.object(ag, "call_search_engine", side_effect=fake_search),
             patch.object(ag, "call_llm_async", side_effect=self._quality_ok),
             patch.object(ag, "call_llm", side_effect=self._make_call_llm([queries_resp, synth1, grade_fail, synth2])),
         ):
@@ -454,7 +454,7 @@ class TestFinalizeAnswerNode:
             })
 
         with (
-            patch.object(ag, "selenium_api_search", return_value=self._FAKE_RESULT),
+            patch.object(ag, "call_search_engine", return_value=self._FAKE_RESULT),
             patch.object(ag, "call_llm_async", side_effect=self._quality_ok),
             patch.object(
                 ag,

@@ -168,7 +168,7 @@ class TestFollowedUpQueriesDefault:
             "curr_num_iterations": 0,
             # followed_up_queries intentionally absent
         }
-        with patch("subagent.agentic_search.selenium_api_search", return_value=[{"results": []}]) as mock_search:
+        with patch("subagent.agentic_search.call_search_engine", return_value=[{"results": []}]) as mock_search:
             result = perform_web_search(state)
         assert result["curr_num_iterations"] == 1
         # Should have searched with original queries, not empty string
@@ -182,7 +182,7 @@ class TestFollowedUpQueriesDefault:
             "url_memo": set(),
             "curr_num_iterations": 0,
         }
-        with patch("subagent.agentic_search.selenium_api_search", return_value=[{"results": []}]) as mock_search:
+        with patch("subagent.agentic_search.call_search_engine", return_value=[{"results": []}]) as mock_search:
             perform_web_search(state)
         mock_search.assert_called_once_with(["follow up query"], True)
 
@@ -194,7 +194,7 @@ class TestFollowedUpQueriesDefault:
             "curr_num_iterations": 0,
         }
         fake_results = [{"results": [{"url": "http://a.com", "title": "A", "content": "c", "raw_content": "r"}]}]
-        with patch("subagent.agentic_search.selenium_api_search", return_value=fake_results):
+        with patch("subagent.agentic_search.call_search_engine", return_value=fake_results):
             result = perform_web_search(state)
         assert "url_memo" in result
         assert "http://a.com" in result["url_memo"]
@@ -208,7 +208,7 @@ class TestFollowedUpQueriesDefault:
             "curr_num_iterations": 0,
         }
         fake_results = [{"results": [{"url": seen_url, "title": "T", "content": "c", "raw_content": "r"}]}]
-        with patch("subagent.agentic_search.selenium_api_search", return_value=fake_results):
+        with patch("subagent.agentic_search.call_search_engine", return_value=fake_results):
             result1 = perform_web_search(state_iter1)
 
         # Simulate LangGraph feeding back the returned url_memo as the next iteration's state
@@ -217,7 +217,7 @@ class TestFollowedUpQueriesDefault:
             "url_memo": result1["url_memo"],
             "curr_num_iterations": result1["curr_num_iterations"],
         }
-        with patch("subagent.agentic_search.selenium_api_search", return_value=fake_results):
+        with patch("subagent.agentic_search.call_search_engine", return_value=fake_results):
             result2 = perform_web_search(state_iter2)
 
         assert result2["web_results"][0]["results"] == [], "duplicate URL should be filtered out in second iteration"
@@ -233,7 +233,7 @@ class TestFollowedUpQueriesDefault:
             {"url": "http://seen.com", "title": "old", "content": "c", "raw_content": "r"},
             {"url": "http://new.com",  "title": "new", "content": "c", "raw_content": "r"},
         ]}]
-        with patch("subagent.agentic_search.selenium_api_search", return_value=fake_results):
+        with patch("subagent.agentic_search.call_search_engine", return_value=fake_results):
             result = perform_web_search(state)
 
         urls_in_results = [r["url"] for r in result["web_results"][0]["results"]]

@@ -9,7 +9,7 @@ from langchain_core.tools import tool
 from langchain_litellm import ChatLiteLLM
 
 from Tools.tools import queries_formatter
-from Utils.utils import selenium_api_search, web_search_deduplicate_and_format_sources
+from Utils.utils import call_search_engine, web_search_deduplicate_and_format_sources
 
 
 # %%
@@ -46,7 +46,7 @@ async def get_background_knowledge(model_name: str, key_word: str):
         [SystemMessage(content=system_instruction.format(key_word=key_word))]
         + [HumanMessage(content="Please help me to find relevant information.")]
     )
-    web_results = selenium_api_search(output.tool_calls[0]["args"]["queries"], True)
+    web_results = call_search_engine(output.tool_calls[0]["args"]["queries"], True)
     source_str = web_search_deduplicate_and_format_sources(web_results, 5000, True)
 
     system_instruction = f"""You are an experienced copywriter who retains important information and summarizes key points and hashtags.
