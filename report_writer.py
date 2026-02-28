@@ -347,18 +347,26 @@ def generate_question(state: SectionState, config: RunnableConfig):
         question_history=_format_question_history(question_history),
     )
 
+    base_prompt = [SystemMessage(content=system_instruction)] + [
+        HumanMessage(content="Generate a structured research question for this section.")
+    ]
+
     logger.info(f"== Start generate question for topic: {section.name} ==")
-    result = call_llm(
-        MODEL_NAME,
-        BACKUP_MODEL_NAME,
-        prompt=[SystemMessage(content=system_instruction)]
-        + [HumanMessage(content="Generate a structured research question for this section.")],
-        tool=[question_formatter],
-        tool_choice="required",
-    )
+    result = call_llm(MODEL_NAME, BACKUP_MODEL_NAME, prompt=base_prompt, tool=[question_formatter], tool_choice="required")
     logger.info(f"== End generate question for topic: {section.name} ==")
 
-    question_text = result.tool_calls[0]["args"]["question"]
+    if not result.tool_calls:
+        logger.warning(f"generate_question: empty tool_calls for '{section.name}', retrying with reminder")
+        result = call_llm(
+            MODEL_NAME,
+            BACKUP_MODEL_NAME,
+            prompt=base_prompt + [result, HumanMessage(content="You must call the question_formatter tool to submit your answer.")],
+            tool=[question_formatter],
+            tool_choice="required",
+        )
+
+    args = result.tool_calls[0]["args"] if result.tool_calls else {}
+    question_text = args.get("question", "") or section.description
     current_question = Question(question=question_text)
     return {
         "current_question": current_question,
