@@ -38,10 +38,19 @@ class RefinedSection(BaseModel):
     )
 
 
+class Question(BaseModel):
+    question: str = Field(
+        description=(
+            "A main research question followed by at most 5 sub-questions covering "
+            "different aspects. Format: main question on the first line, then "
+            "sub-questions as bullet points."
+        )
+    )
+
+
 class ReportStateInput(TypedDict):
     # Report topic
     topic: str
-    refine_iteration: int
 
 
 class ReportStateOutput(TypedDict):
@@ -81,12 +90,13 @@ class SectionState(TypedDict):
     section: Section
     # Number of search iterations done
     search_iterations: int
-    # List of search queries
-    search_queries: list[SearchQuery]
-    # List of follow-up search queries
-    follow_up_queries: list[SearchQuery]
-    queries_history: Annotated[list, operator.add]
-    # String of formatted source content from web search
+    # Gap description from grader/redefine; drives next generate_question call
+    weakness: str
+    # Active question passed to the orchestration node
+    current_question: Question
+    # History of question strings (accumulated via operator.add)
+    question_history: Annotated[list, operator.add]
+    # String of formatted source content from web search (accumulated Q&A pairs)
     source_str: str
     # String of any completed sections from research to write final sections
     report_sections_from_research: str

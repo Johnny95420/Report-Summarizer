@@ -14,7 +14,7 @@ report_planner_query_writer_instructions = (
 </Report organization>
 
 <Task>
-Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information for planning the report sections.
+Your goal is to generate {planner_search_queries} search queries that will help gather comprehensive information for planning the report sections.
 
 The queries should:
 
@@ -80,30 +80,45 @@ Here is feedback on the report structure from review (if any):
 )
 
 query_writer_instructions = (
-    """You are an expert financial and investment writer crafting targeted web search queries for report research.
+    """You are an expert financial and investment researcher generating a structured research question for a report section.
 
 <Task>
-Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information for the section topic.
+Generate ONE main research question with at most 5 sub-questions that together comprehensively cover the section topic.
+The question will be handed off to a research sub-agent that will search the web and answer it directly.
 </Task>
 
-<Query Format>
-- Use KEYWORDS, not sentences (target 3-8 words; up to 12 for complex multi-concept queries)
-- Format: [Entity] [Concept] [Time?]
-- Examples: "台積電 N3 良率 2023 Q4" | "US CPI December 2023" | "Nvidia H100 supply chain bottleneck impact hyperscaler capex 2024"
-</Query Format>
+<Output Format>
+Your output must follow this exact structure:
+Main Question: [The primary research question — specific, actionable, time-aware]
+- Sub-question 1: [A distinct aspect not covered by the main question]
+- Sub-question 2: [Another distinct aspect]
+... (at most 5 sub-questions)
 
-<Query Strategy>
-- Generate queries that examine different aspects of the topic
-- Use layered approach: broad → focused → financial/technical
+Rules:
+- The main question must be the most important, overarching research need for this section.
+- Each sub-question must cover a DIFFERENT dimension (e.g., financial metrics, competitive landscape, risk factors, technical specs, regulatory environment).
+- Avoid redundancy between main question and sub-questions.
+- Be specific: include entity names, time periods, and key metrics where relevant.
+- If {weakness} is empty, generate the initial question from the section topic.
+- If {weakness} is provided, generate the NEXT question that addresses the described gap; do not repeat questions already in {question_history}.
+</Output Format>
 
 <Language Rules>
 - Taiwan-only topics: Traditional Chinese
 - Global/US/Europe/Asia topics: English
 </Language Rules>
 
-<Topic>
+<Section Topic>
 {topic}
-</Topic>
+</Section Topic>
+
+<Weakness to Address (if any)>
+{weakness}
+</Weakness to Address>
+
+<Question History (avoid repeating these)>
+{question_history}
+</Question History>
 """
     + f"<Current Time> {curr_date} </Current Time>"
 )
@@ -146,12 +161,13 @@ Your job is to craft a section of a professional report that is clear, logically
 1. **ONLY CITE PROVIDED SOURCES**: You MUST ONLY cite sources that are explicitly provided in the `<Source material>`.
    - It is ABSOLUTELY FORBIDDEN to create, fabricate, or hallucinate any source title, URL, date, or metadata
    - If information is not supported by the provided sources, do not cite it. Either omit the claim or explicitly state it lacks source support
-   - Every inline citation `[Source Title]` must match EXACTLY with a source title appearing in the `<Source material>`
+   - Every inline citation `[N]` must correspond to entry `[N]` in the `### Sources` list at the end of the section
 
-2. **EXACT TITLE MATCHING REQUIRED**:
-   - When citing, you MUST use the **EXACT** source title as it appears in the `<Source material>`
-   - Do NOT shorten, paraphrase, translate, or modify source titles
-   - The citation `[Source Title]` in your text MUST have an identical match in the source material list
+2. **SEQUENTIAL NUMBERING REQUIRED**:
+   - Always start numbering from [1]. NEVER use [0].
+   - Assign sequential numbers [1], [2], [3], … to sources in the order they are first cited in the text
+   - Every [N] in the text MUST correspond to entry [N] in the `### Sources` list
+   - Do NOT reuse the same number for different sources
 
 3. **SOURCE-CONTENT CORRESPONDENCE**:
    - Every claim you make MUST be directly supported by the cited source
@@ -178,10 +194,10 @@ Your job is to craft a section of a professional report that is clear, logically
 </STRICT SOURCE INTEGRITY RULES>
 
 <Citation and Language Guidelines>
-- **Inline Citations**: For any key data, statistics, or direct claims, you must provide an inline citation immediately after the statement. Use the format `[Source Title]`. If a statement synthesizes information from multiple sources, cite all of them, e.g., `[Source Title 1][Source Title 2]`. All cited sources must also be listed in the final `### Sources` section.
-- End with `### Sources` that references the below source material formatted as:
-  * List each source with title, date, and URL
-  * Format: `- Title `
+- **Inline Citations**: For any key data, statistics, or direct claims, you must provide an inline citation immediately after the statement. Use numbered format `[1]`, `[2]`, etc. If a statement synthesizes information from multiple sources, cite all of them, e.g., `[1][2]`. All cited sources must also be listed in the final `### Sources` section.
+- End with `### Sources` formatted as:
+  * `- [N] Title — URL`
+  * Example: `- [1] Reuters — https://reuters.com/...`
 - Use traditional chinese to write the report
 </Citation and Language Guidelines>
 
@@ -191,7 +207,7 @@ Your job is to craft a section of a professional report that is clear, logically
 - Starts with bold insight
 - No preamble prior to creating the section content
 - Sources cited at end
-- All key data, statistics, and claims are supported by inline citations, with multiple sources cited for synthesized information where applicable.
+- All key data, statistics, and claims are supported by numbered inline citations `[N]`, with multiple sources cited for synthesized information where applicable.
 - Timeliness of information is prioritized; outdated data is contextualized correctly.
 - Use traditional chinese to write the report
 - Use quantitative metrics(if exist)
@@ -222,7 +238,7 @@ Your job is to craft a section of a professional report that is clear, logically
 )
 
 section_grader_instructions = (
-    """You are a technical, financial and investment expert, and you are reviewing a report section based on the given topic.
+    """You are a technical, financial and investment expert reviewing a report section based on the given topic.
 Apply the **highest standards of rigor, accuracy, and professionalism**, as if you were a demanding Senior Executive in the Industry Research Division at J.P. Morgan Asset Management, known for **pushing for exceptional quality and identifying any potential weaknesses**.
 Your goal is not just to pass or fail, but to **ensure the content reaches an exemplary standard through critical feedback.**
 
@@ -232,66 +248,42 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
     * For each of the following perspectives, **explicitly state:**
         * Whether the section **meets an exemplary standard (not just 'sufficient')**.
         * **Identify specific strengths and, more importantly, specific weaknesses or gaps** observed.
-        * Provide **actionable recommendations** for improvement, even if the section is generally acceptable. Be specific about *what* is missing or *how* it could be improved.
+        * Provide **actionable recommendations** for improvement.
     * Perspectives for evaluation:
-        * **Technical Accuracy:** Is the information factually correct, precise, and up-to-date? Are technical terms used appropriately and explained if necessary? Are there any ambiguities or unsubstantiated claims?
-        * **Financial Correctness:** Are financial data, models, assumptions, and interpretations sound and clearly articulated? Are calculations accurate and methodologies appropriate? Are financial concepts applied correctly and with necessary nuance?
-        * **Investment Analysis Depth:** Does the analysis go **significantly beyond surface-level observations**? Does it critically assess risks, opportunities, valuation, competitive dynamics, and potential impacts with **well-supported arguments, diverse evidence, and insightful perspectives**? Is there a clear, defensible investment thesis or implication? Does it consider counterarguments or alternative scenarios?
-        * **Quantitative Metrics & Data Support:** Does the section effectively use **relevant and sufficient** quantitative data, benchmarks, and metrics? Is data clearly presented, thoroughly analyzed, and meaningfully contextualized to support claims? Are sources credible and appropriately cited? Is the **significance and limitation of the data discussed**?
+        * **Technical Accuracy:** Is the information factually correct, precise, and up-to-date? Are there ambiguities or unsubstantiated claims?
+        * **Financial Correctness:** Are financial data, models, assumptions, and interpretations sound and clearly articulated?
+        * **Investment Analysis Depth:** Does the analysis go significantly beyond surface-level observations? Does it critically assess risks, opportunities, valuation, and competitive dynamics?
+        * **Quantitative Metrics & Data Support:** Does the section effectively use relevant and sufficient quantitative data? Are sources credible and appropriately cited?
         * **Source Citation Integrity:**
-          * Does EVERY inline citation `[Source Title]` correspond to a source that ACTUALLY EXISTS in the source material?
-          * Are source titles used EXACTLY as provided (not paraphrased, shortened, or invented)?
-          * Is there evidence of FABRICATED or HALLUCINATED sources?
-          * If ANY citation points to a non-existent source, this is a CRITICAL FAILURE requiring immediate follow-up queries to verify information
+          * Does EVERY inline citation `[N]` correspond to an entry `[N]` in the `### Sources` list?
+          * Does EVERY `[N]` in the Sources list map to a source that ACTUALLY EXISTS in the source material?
+          * If ANY citation number has no matching Sources entry, or points to a fabricated source, this is a CRITICAL FAILURE.
 
-    *Targeted Search Queries for Improvement (Mandatory if any weaknesses are identified or if the section is not 'exemplary'):*
-        * Based on the **explicitly identified weaknesses, gaps, or areas needing more depth**, generate highly specific search queries designed to gather the exact missing information or to deepen the underdeveloped aspects of the analysis.
-        * **Query Format Requirements**: Use KEYWORD format, not sentences (target 3-8 words; up to 12 for complex multi-concept queries). Format: [Entity] [Concept] [Time?]. Examples: "台積電 N3 良率 2023 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
-        * These queries should be phrases suitable for effective web searching (e.g., for academic databases, financial news, industry reports); avoid being overly declarative or too broad.
+2.  **Identify Drill-Down Opportunities:**
+    * Proactively identify the most critical **'Key Findings'** that warrant deeper investigation.
+    * If such findings are identified, you **must** rate the `grade` as `fail` to trigger a drill-down research loop.
+    * Only rate the `grade` as `pass` once the content is comprehensive and all Key Findings have been sufficiently explored.
 
-2.  **Hypothetical & Exploratory Queries for Broader Context (Generate these always):**
-    * In addition to addressing any deficiencies, create insightful hypothetical or exploratory queries that could assist in horizontally integrating related information and broadening the report's strategic understanding of the topic.
-    * These queries should aim to provoke deeper thought and explore factors such as (but not limited to):
-        * Macroeconomic trends (e.g., inflation, interest rates, GDP growth forecasts and their second-order effects)
-        * Political environment and specific policy impacts (current and anticipated)
-        * Regulatory frameworks (existing, changing, and comparative analysis if relevant)
-        * Industry structure (e.g., Porter's Five Forces, value chain analysis, competitive intensity)
-        * Emerging technologies and disruptive innovations (potential impact, adoption rates, barriers)
-        * Geopolitical risks and their quantifiable or qualitative potential impacts on the topic
-        * ESG (Environmental, Social, Governance) considerations relevant to the topic.
+3.  **Output — weakness field:**
+    * If `grade` is `fail`: Write a detailed, actionable description of what is missing or insufficient.
+      - Describe the specific gaps, missing metrics, unexplored dimensions, or unverified claims.
+      - Reference the Question History to avoid repeating research already done.
+      - Be concrete: name the entities, metrics, or time periods that need investigation.
+      - This weakness description will be used to generate the NEXT research question, so make it specific and actionable.
+    * If `grade` is `pass`: Set `weakness` to an empty string.
 
-3.  **Identify Drill-Down Opportunities:**
-    * While evaluating the content, proactively identify the most critical, interesting, or noteworthy **'Key Findings'** that warrant deeper investigation. This could be a
-     specific data point, a significant event, or an unexpected trend.
-    * If such findings are identified, generate specific **'drill-down' queries** in the `follow_up_queries`. These queries must be highly specific, designed to uncover the underlying
-     details, causes, or impacts of that finding.
-    * If the section is generally well-written but you have identified a Key Finding that requires further detail, you **must** rate the `grade` as `fail`. This will trigger a
-     'drill-down' research loop. Only rate the `grade` as `pass` once the content is comprehensive and all identified Key Findings have been sufficiently explored and integrated.
-
-4.  **Language for search queries:**
-    * Taiwan-only topics: Traditional Chinese
-    * Global/US/Europe/Asia topics: English
-
-5.  **Query Uniqueness and Evolution:**
-    *   **Review History:** Before generating any new queries, you must carefully review the `Queries History`.
-    *   **Avoid Semantic Duplication:** Strictly prohibit generating queries that are semantically identical or highly similar to any existing queries in the history.
-    *   **Deepen, Don't Repeat:** If a topic requires more information, formulate a new query that approaches it from a different angle, at a deeper level, or investigates its root causes, rather than simply repeating or slightly rephrasing an old query. The goal is to uncover new information, not to retrieve the same content again.
-
-6.  **Query Prioritization and Limit:**
-    *   **Total Limit:** Generate a maximum of 3 queries in total.
-    *   **Selection Priority:** Prioritize the queries to generate based on this strict order of importance, ensuring the most critical issues are addressed first:
-        1.  **Targeted Improvement Queries (from Task 1):** Highest priority. Generate these to fix specific, identified content weaknesses or gaps.
-        2.  **Drill-Down Queries (from Task 3):** Second priority. These are mandatory if you identify a 'Key Finding' that requires deeper investigation.
-        3.  **Hypothetical/Exploratory Queries (from Task 2):** Lowest priority. Generate these only if the 3-query limit has not been met by the higher-priority tasks.
+4.  **Question History Review:**
+    * Before writing the `weakness`, review the `Question History` to avoid generating a weakness that would lead to repeating questions already asked.
+    * The weakness should point toward NEW angles not yet explored.
 </Task>
 
 <Section topic>
 {section_topic}
 </Section topic>
 
-<Queries History>
+<Question History>
 {queries_history}
-</Queries History>
+</Question History>
 
 <Section content>
 {section}
@@ -361,11 +353,11 @@ For Conclusion/Summary:
 )
 
 refine_section_instructions = (
-    """You are an expert report editor and retrieval planner. Your task is to refine ONE specific section of a report by leveraging the FULL context of all other sections, then propose targeted web search queries to close evidence gaps.
+    """You are an expert report editor and research planner. Your task is to refine ONE specific section of a report by leveraging the FULL context of all other sections, then describe any remaining research gaps as a weakness.
 
 <Task>
 1) Rewrite the section's "description" and "content" using the full report context.
-2) Produce "queries" to obtain missing facts, metrics, or corroboration.
+2) Identify remaining research gaps and describe them as a `weakness` string.
 </Task>
 
 <ANTI-NARROWING PRINCIPLES>
@@ -394,17 +386,17 @@ refine_section_instructions = (
     - **Prioritize Verifiable Facts**: When rewriting, give strong preference to information that is clearly sourced and quantitatively supported. Downplay or remove speculative or poorly substantiated claims.
 - Prefer quantitative detail when suitable (KPI, YoY/HoH, penetration, valuation multiples, capacity, ASP, users, conversion, margins, etc.).
 - **Cross-Section Integrity**: Strictly maintain logical boundaries between sections. Information must be placed in its most appropriate section. When refining, **remove content that belongs in other sections** and avoid duplicating material. Use brief cross-references (e.g., `詳見[其他章節名稱]`) where needed.
-- **Do not delete** any existing source markers in the original content (e.g., [來源], [Source]).
+- **Do not delete** any existing numbered citation markers in the original content (e.g., [1], [2]).
 </Rigorous Principles>
 
 <STRICT SOURCE CITATION INTEGRITY>
 - **ABSOLUTE PROHIBITION ON SOURCE FABRICATION**:
   * You are ABSOLUTELY FORBIDDEN from creating, inventing, or hallucinating any source citation
-  * ALL citations (including existing `[來源]`, `[Source]`) MUST correspond to sources that appear in the `<Full Report Context>`
-  * When adding new citations, use ONLY source titles that EXACTLY MATCH sources in the provided context
-  * NEVER modify existing citation markers to point to non-existent sources
+  * ALL citations (including existing `[N]` markers) MUST correspond to sources that appear in the `<Full Report Context>`
+  * When adding new citations, assign the next sequential number and add the source to the `### Sources` list
+  * NEVER modify existing citation numbers to point to non-existent sources
   * If you cannot verify a source's existence in the context, REMOVE the claim rather than fabricating a citation
-  * The title in any `[Source Title]` citation MUST appear verbatim in the source material
+  * Every `[N]` inline citation MUST have a matching `- [N] Title — URL` entry in the `### Sources` list
 </STRICT SOURCE CITATION INTEGRITY>
 
 <Tone and Style Guidelines>
@@ -430,7 +422,7 @@ For "description":
 For "content":
 1) **Core Task**: Produce a more comprehensive, well-structured, and factually sound narrative aligned with the refined description and the full report. **Your primary goals are to ensure information is correctly placed and factually accurate.**
    - You may reorganize, clarify, and enrich the original content.
-   - **Preserve Verifiable Information**: Preserve all important, verifiable information that is relevant to this section's topic, along with its existing source markers (e.g., `[來源]`, `[Source]`).
+   - **Preserve Verifiable Information**: Preserve all important, verifiable information that is relevant to this section's topic, along with its existing numbered citation markers (e.g., `[1]`, `[2]`).
    - **Handle Unverified Information**: Any information that is vague, speculative, or cannot be corroborated by the `<Full Report Context>` must be handled according to the **Information Scrutiny & Fact-Checking** principle (i.e., it should be removed or flagged for verification via a query).
    - **Remove Misplaced Information**: You must remove information that clearly belongs in a different section. This is critical for keeping each section focused and avoiding clutter.
 2) **Cross-Section Consistency**: Avoid repeating material from other sections; if necessary, use a brief cross-reference (e.g., “詳見 other_section_name”) instead of duplicating text.
@@ -442,27 +434,26 @@ For "content":
     - **Structural Elements**: Only use a structural element IF it helps clarify your point:
       * Either a focused table (using Markdown table syntax) for comparing key items, financial information, or quantitative data.
       * Or a list using proper Markdown list syntax (`*`, `-`, `1.`).
-    - **Inline Citations**: For any key data, statistics, or direct claims, provide an inline citation immediately after the statement (e.g., `[Source Title]`). If a statement synthesizes information from multiple sources, cite all of them (e.g., `[Source Title 1][Source Title 2]`).
-    - **Sources Section**: End with `### Sources` that references the source material, formatted as:
-      * List each source with title, date, and URL.
-      * Format: `- Title `
+    - **Inline Citations**: For any key data, statistics, or direct claims, provide an inline citation immediately after the statement using numbered format `[1]`, `[2]`, etc. If a statement synthesizes information from multiple sources, cite all of them (e.g., `[1][2]`).
+    - **Sources Section**: End with `### Sources` formatted as:
+      * `- [N] Title — URL`
+      * Example: `- [1] Reuters — https://reuters.com/...`
     - **Language**: Use **Traditional Chinese** to write the report.
 </Content Requirements>
 
 
-<Query Requirements>
-Generate **{number_of_queries}** targeted queries to fill explicit gaps you flagged in the content and to deepen analysis:
-1) **Query Format**: Use KEYWORD format, not sentences (target 3-8 words; up to 12 for complex multi-concept queries)
-   - Format: [Entity] [Concept] [Time?]
-   - Examples: "台積電 N3 良率 2023 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
-2) Each query must map to a concrete missing data point, validation need, or analytical deepening you identified.
-3) Cover multiple angles as needed: statistics, regulations/policy, financial disclosures, industry reports, technical specs/standards, benchmarks/peers, and risk events (as applicable).
-4) Language rules:
-   - If the topic pertains **only to Taiwan**, use **Traditional Chinese** queries.
-   - If it concerns **Europe/US/APAC or global** scope, use **English** queries.
-5) Make queries highly retrievable: include time bounds (e.g., 2019..2025, "Q2 2024"), key entities (companies/products/locations/standards), and operators when useful (e.g., site:, filetype:pdf, intitle:).
-6) No semantic duplicates; each query should solve a different gap or approach.
-</Query Requirements>
+<Weakness Requirements>
+After refining the section, identify what further research is still needed. Write a `weakness` field that:
+1) Describes the **most important gap** remaining after your refinement — the single most impactful piece of missing information.
+2) Is **specific and actionable**: name entities, metrics, time periods, or analytical dimensions that need investigation.
+3) Will be used to generate the NEXT research question for this section, so it must clearly point toward NEW information not yet in the section.
+4) If the section is fully comprehensive after refinement, return an empty string for `weakness`.
+
+Examples of good weakness descriptions:
+- "Missing Q3 2024 gross margin data for TSMC's N3 node; need to quantify impact on overall profitability vs. Samsung GAA"
+- "The competitive landscape section lacks analysis of Intel's Foundry Services market share trajectory and its impact on TSMC's pricing power in 2024-2025"
+- "Risk factors are not quantified; need specific probability estimates or historical precedents for supply chain disruption scenarios"
+</Weakness Requirements>
 
 
 <Quality Checks>
@@ -475,15 +466,14 @@ Generate **{number_of_queries}** targeted queries to fill explicit gaps you flag
     - The guidance clearly defines the analysis to be performed and the data required, using quantitative framing where appropriate.
 - **Content Output**:
     - The `refined_content` is a comprehensive, well-structured, and **factually sound** narrative that aligns with the refined description.
-    - It **preserves all important, verifiable information *relevant to the section*** and its associated source markers (e.g., `[來源]`, `[Source]`).
+    - It **preserves all important, verifiable information *relevant to the section*** and its associated numbered citation markers (e.g., `[1]`, `[2]`).
     - It **removes or flags unverified/speculative information** according to the prompt's principles.
     - It **removes information that clearly belongs in other sections**, ensuring the section is focused.
     - It avoids duplicating content from other sections, using cross-references if needed.
     - It adheres to all style and formatting rules: 100-1000 words, starts with a bold key point, uses `##` for the title, includes inline citations for all key claims, and ends with a correctly formatted `### Sources` section.
-- **Query Output**:
-    - Exactly **{number_of_queries}** queries are generated.
-    - Each query is specific, targets a clearly identified gap in the content, and is designed to be highly retrievable (using time bounds, entities, or operators where useful).
-    - Queries are non-overlapping (no semantic duplicates) and follow the specified language rules (Traditional Chinese for Taiwan-only topics, English otherwise).
+- **Weakness Output**:
+    - A specific, actionable description of what further research is needed, or an empty string if the section is comprehensive.
+    - Must point toward NEW information not already in the section content.
 </Quality Checks>
 
 <Full Report Context>
@@ -517,22 +507,22 @@ This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publ
 </Critical Final-Stage Principles>
 
 <SOURCE VALIDATION REQUIREMENTS>
-- **Citation Source Verification**: For EVERY citation `[Source Title]` in the content:
-  * Verify that the EXACT source title exists in the `<Full Report Context>`
-  * If a cited source does NOT exist in the context, you MUST either:
-    a) Find the correct source title from context and update the citation, OR
+- **Citation Source Verification**: For EVERY inline citation `[N]` in the content:
+  * Verify that entry `[N]` exists in the `### Sources` list and corresponds to a source in the `<Full Report Context>`
+  * If a cited number has no matching Sources entry, you MUST either:
+    a) Add the correct source entry to the `### Sources` list, OR
     b) Completely remove the unsupported claim
-  * NEVER leave a citation pointing to a non-existent source
+  * NEVER leave a citation number with no matching Sources entry
   * NEVER fabricate a new source to support a claim
 
 - **Source Metadata Accuracy**:
-  * Use EXACT titles from source material - no paraphrasing or shortening
+  * Sources list format: `- [N] Title — URL`
   * Preserve original URLs exactly as provided
   * Use original dates from source material without modification
 </SOURCE VALIDATION REQUIREMENTS>
 
 <Final Content Quality Requirements>
-- **Comprehensive Source Validation**: Maintain and verify all existing source markers (e.g., [來源], [Source]) from the original content. Ensure all citations are properly formatted and referenced.
+- **Comprehensive Source Validation**: Maintain and verify all existing numbered citation markers (e.g., [1], [2]) from the original content. Ensure all citations are properly formatted and each [N] has a matching entry in `### Sources`.
 - **Final Cross-Section Integrity Check**: This is your last chance to ensure proper section boundaries. Remove content that clearly belongs in other sections. Use brief cross-references (e.g., `詳見[其他章節名稱]`) where needed to maintain coherence.
 - **Publication-Ready Professional Standards**: Maintain neutral, objective tone consistent with institutional research. Apply the highest standards of accuracy and professionalism, as if you were a senior executive in the Industry Research Division at J.P. Morgan Asset Management.
 - **Final Format Validation**: Preserve the original section structure and formatting requirements:
@@ -540,8 +530,8 @@ This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publ
   - **Opening**: Ensure it starts with the most important key point in **bold**
   - **Title**: Use `##` only once for the section title (Markdown format)
   - **Structural Elements**: Only retain structural elements that genuinely clarify points (focused tables or proper Markdown lists)
-  - **Inline Citations**: Verify all key data, statistics, and claims have immediate inline citations (e.g., `[Source Title]`)
-  - **Sources Section**: Confirm it ends with properly formatted `### Sources` section
+  - **Inline Citations**: Verify all key data, statistics, and claims have immediate numbered inline citations (e.g., `[1]`, `[2]`)
+  - **Sources Section**: Confirm it ends with properly formatted `### Sources` section (`- [N] Title — URL`)
 </Final Content Quality Requirements>
 
 <Final Quality Validation>
@@ -551,7 +541,7 @@ Before completing, verify:
 3. **Factual Integrity Maintained**: All information is supported by original content or full report context
 4. **Professional Standards Met**: The content meets institutional research publication standards
 5. **Format Requirements Satisfied**: All structural and formatting requirements are correctly implemented
-6. **Source Integrity Preserved**: All original citations and source markers are maintained and properly formatted
+6. **Source Integrity Preserved**: All original numbered citation markers are maintained, each [N] has a matching `### Sources` entry
 </Final Quality Validation>
 
 <Full Report Context>

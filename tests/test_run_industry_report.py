@@ -30,6 +30,19 @@ def _make_llm_response(tool=None, **extra):
         if "queries_formatter" in tool_names:
             resp.tool_calls = [{"args": {"thought": "mock", "queries": ["mock query 1"]}}]
 
+        elif "question_formatter" in tool_names:
+            resp.tool_calls = [
+                {
+                    "args": {
+                        "question": (
+                            "Main Question: What are the key aspects of this topic?\n"
+                            "- Sub-question 1: What are the main drivers?\n"
+                            "- Sub-question 2: What are the key risks?"
+                        )
+                    }
+                }
+            ]
+
         elif "section_formatter" in tool_names:
             resp.tool_calls = [
                 {
@@ -51,7 +64,7 @@ def _make_llm_response(tool=None, **extra):
             ]
 
         elif "feedback_formatter" in tool_names:
-            resp.tool_calls = [{"args": {"grade": "pass", "follow_up_queries": []}}]
+            resp.tool_calls = [{"args": {"grade": "pass", "weakness": ""}}]
 
         elif "content_refinement_formatter" in tool_names:
             resp.tool_calls = [{"args": {"refined_content": "Refined mock content."}}]
@@ -91,9 +104,9 @@ async def test_industry_report_end_to_end():
         # Web search used in _perform_planner_search
         "report_writer.selenium_api_search": lambda *a, **kw: [],
         "report_writer.web_search_deduplicate_and_format_sources": lambda *a, **kw: "mock web results",
-        # Agentic search subgraph used in search_db
+        # Agentic search subgraph used in orchestration
         "report_writer.agentic_search_graph": MagicMock(
-            ainvoke=AsyncMock(return_value={"source_str": "mock agentic search results"})
+            ainvoke=AsyncMock(return_value={"answer": "Mock agentic search answer with [1] citations.\n\n### Sources\n[1] Mock Source — http://mock.com"})
         ),
     }
 
@@ -111,16 +124,19 @@ async def test_industry_report_end_to_end():
             config = {
                 "configurable": {
                     "thread_id": "integration-test",
-                    "number_of_queries": 2,
+                    "planner_search_queries": 2,
                     "use_web": True,
                     "use_local_db": False,
                     "max_search_depth": 1,
+                    "agentic_search_iterations": 1,
+                    "agentic_search_queries": 3,
+                    "refine_iteration": 0,
                     "report_structure": "default",
                     "recursion_limit": 100,
                 }
             }
 
-            input_data = ReportStateInput(topic="Test topic", refine_iteration=0)
+            input_data = ReportStateInput(topic="Test topic")
 
             # Phase 1: run until human_feedback interrupt
             interrupted = False

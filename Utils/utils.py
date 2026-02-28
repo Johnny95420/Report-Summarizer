@@ -309,6 +309,8 @@ content_extractor = ContentExtractor()
 
 
 def selenium_api_search(search_queries, include_raw_content: bool):
+    host = os.environ.get("SEARCH_HOST", None)
+    port = os.environ.get("SEARCH_PORT", None)
     memo = set()
     search_docs = []
 
@@ -330,7 +332,7 @@ def selenium_api_search(search_queries, include_raw_content: bool):
                     params={
                         "query": query,
                         "include_raw_content": include_raw_content,
-                        "max_results": 5,
+                        "max_results": 10,
                         "timeout": 600,
                     },
                     timeout=600,  # Give slightly more time than the service timeout
@@ -432,7 +434,8 @@ def web_search_deduplicate_and_format_sources(search_response, include_raw_conte
     formatted_text = "Sources:\n\n"
     for _i, source in enumerate(unique_sources.values(), 1):
         formatted_text += f"Source {source['title']}:\n===\n"
-        formatted_text += f"URL: {source['url']}\n===\n"
+        url = source['url']
+        formatted_text += f"URL: {url if url.startswith('http') else '[content excerpt]'}\n===\n"
         formatted_text += f"Most relevant content from source: {source['content']}\n===\n"
         if include_raw_content:
             raw_content = source.get("raw_content", "")
