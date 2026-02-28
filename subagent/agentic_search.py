@@ -544,7 +544,12 @@ if __name__ == "__main__":
                 timings.append((node_name, elapsed))
                 print(f"  [{elapsed:6.2f}s] {node_name}")
                 if isinstance(node_updates, dict):
-                    accumulated.update(node_updates)
+                    for k, v in node_updates.items():
+                        if k == "source_registry" and isinstance(v, list):
+                            accumulated.setdefault("source_registry", [])
+                            accumulated["source_registry"].extend(v)
+                        else:
+                            accumulated[k] = v
             t_prev = t_now
 
         total = time.perf_counter() - t_start

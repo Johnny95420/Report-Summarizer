@@ -528,13 +528,14 @@ def _grade_section_content(section: Section, state: SectionState) -> Command[Lit
         tool_choice="required",
     )
 
-    feedback_data = feedback.tool_calls[0]["args"]
+    feedback_data = feedback.tool_calls[0]["args"] if feedback.tool_calls else {}
+    grade = feedback_data.get("grade", "fail")
+    weakness = feedback_data.get("weakness", "")
 
-    if feedback_data["grade"] == "pass":
+    if grade == "pass":
         logger.info(f"Section:{section.name} pass model check.")
         return Command(update={"completed_sections": [section]}, goto=END)
     else:
-        weakness = feedback_data["weakness"]
         logger.info(f"Section:{section.name} fail model check. Weakness: {weakness[:100]}...")
         return Command(
             update={"weakness": weakness, "section": section},
