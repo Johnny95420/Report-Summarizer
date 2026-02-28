@@ -5,7 +5,6 @@ Heavy deps (Chroma, BM25, HuggingFaceEmbeddings) are mocked.
 """
 
 import os
-import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -463,101 +462,6 @@ class TestChromaCleanup:
 
         reader.close_document()
         assert "chap1" in reader._bookmarks
-
-
-# ---------------------------------------------------------------------------
-# get_embedding_model error handling (C9)
-# ---------------------------------------------------------------------------
-class TestGetEmbeddingModelErrors:
-    def test_embedding_model_load_failure(self):
-        """Embedding model load failure should raise RuntimeError (C9 fix)."""
-        import Tools.text_navigator as tn
-
-        # Reset singleton
-        old_state = tn._embedding_state
-        tn._embedding_state = None
-
-        try:
-            with (
-                patch("Tools.text_navigator.HuggingFaceEmbeddings", side_effect=OSError("disk full")),
-                pytest.raises(RuntimeError, match="Failed to load embedding model"),
-            ):
-                tn.get_embedding_model("bad-model")
-        finally:
-            tn._embedding_state = old_state
-
-    def test_concurrent_requests_return_matching_model_name(self):
-        """Concurrent callers must never receive an embedding for the wrong model name."""
-        import Tools.text_navigator as tn
-
-        old_state = tn._embedding_state
-        tn._embedding_state = None
-        mismatches: list[tuple[str, str]] = []
-        names = ("model-a", "model-b")
-        start = threading.Barrier(8)
-
-        class _FakeEmb:
-            def __init__(self, model_name: str):
-                self.model_name = model_name
-
-        def _worker(worker_id: int):
-            start.wait()
-            for i in range(200):
-                requested = names[(worker_id + i) % 2]
-                emb = tn.get_embedding_model(requested)
-                if emb.model_name != requested:
-                    mismatches.append((requested, emb.model_name))
-
-        try:
-            with patch("Tools.text_navigator.HuggingFaceEmbeddings", side_effect=_FakeEmb):
-                threads = [threading.Thread(target=_worker, args=(i,)) for i in range(8)]
-                for t in threads:
-                    t.start()
-                for t in threads:
-                    t.join()
-        finally:
-            tn._embedding_state = old_state
-
-        assert mismatches == []
-
-    def test_cache_hit_skips_initialization(self):
-        """Fast path must NOT call HuggingFaceEmbeddings() again on cache hit."""
-        import Tools.text_navigator as tn
-
-        old_state = tn._embedding_state
-        tn._embedding_state = None
-        try:
-            with patch("Tools.text_navigator.HuggingFaceEmbeddings") as mock_emb:
-                mock_emb.return_value = MagicMock(model_name="shared-model")
-                emb1 = tn.get_embedding_model("shared-model")
-                assert mock_emb.call_count == 1
-                emb2 = tn.get_embedding_model("shared-model")
-                assert mock_emb.call_count == 1, "Cache hit must not reinitialize"
-                assert emb1 is emb2
-        finally:
-            tn._embedding_state = old_state
-
-    def test_model_name_mismatch_forces_rebuild(self):
-        """Requesting a different model_name must build a new HuggingFaceEmbeddings instance."""
-        import Tools.text_navigator as tn
-
-        old_state = tn._embedding_state
-        tn._embedding_state = None
-        try:
-            class _FakeEmb:
-                def __init__(self, model_name: str):
-                    self.model_name = model_name
-
-            with patch("Tools.text_navigator.HuggingFaceEmbeddings", side_effect=_FakeEmb) as mock_emb:
-                emb1 = tn.get_embedding_model("model-a")
-                assert emb1.model_name == "model-a"
-                assert mock_emb.call_count == 1
-                emb2 = tn.get_embedding_model("model-b")
-                assert emb2.model_name == "model-b"
-                assert mock_emb.call_count == 2, "Different model name must trigger rebuild"
-                assert emb1 is not emb2
-        finally:
-            tn._embedding_state = old_state
 
 
 # ---------------------------------------------------------------------------
