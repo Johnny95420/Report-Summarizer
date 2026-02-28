@@ -4,6 +4,7 @@ import logging
 import pathlib
 import re
 import sys
+import uuid
 
 # Ensure project root is on sys.path when run as a script (python subagent/agentic_search.py)
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -23,7 +24,10 @@ VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
 BACKUP_VERIFY_MODEL_NAME = config["BACKUP_VERIFY_MODEL_NAME"]
 
 from langchain_community.callbacks.infino_callback import get_num_tokens
+from langchain_community.vectorstores import Chroma
+from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
@@ -36,10 +40,11 @@ from Tools.tools import (
     searching_grader_formatter,
     summary_formatter,
 )
+from Utils.embeddings import get_embedding_model
 from Utils.utils import (
     call_llm,
     call_llm_async,
-    selenium_api_search,
+    call_search_engine,
     web_search_deduplicate_and_format_sources,
 )
 
@@ -202,13 +207,13 @@ def perform_web_search(state: AgenticSearchState):
         queries = state["queries"]
         logger.info(f"Performing web search for queries: {queries}")
 
-    web_results = selenium_api_search(queries, True)
+    web_results = call_search_engine(queries, True)
     dedup_results = []
     for results in web_results:
         dedup_results.append({"results": []})
         for result in results["results"]:
             if result["url"] not in url_memo:
-                # Only track real URLs in url_memo; _partN chunk keys are ephemeral
+                # chunk_large_articles reuses original URLs; only register http URLs to avoid duplicate tracking
                 if result["url"].startswith("http"):
                     url_memo.add(result["url"])
                 dedup_results[-1]["results"].append(result)
@@ -285,8 +290,6 @@ async def compress_raw_content(state: AgenticSearchState):
 
     # Increase semaphore: fewer LLM calls after pass-through means higher concurrency is safe
     semaphore = asyncio.Semaphore(4)
-
-    _COMPRESS_CHAR_THRESHOLD = 5000
 
     async def compress_content_with_metadata(query_idx: int, result_idx: int, query: str, result: dict):
         """Compress content with semaphore control and metadata preservation.
@@ -476,6 +479,64 @@ def finalize_answer(state: AgenticSearchState) -> dict:
     )}
 
 
+_CHUNK_THRESHOLD = 5000  # chars; articles shorter than this pass through chunk_large_articles unchanged
+_COMPRESS_CHAR_THRESHOLD = 5000  # chars; content shorter than this passes through compress_raw_content unchanged
+
+
+def chunk_large_articles(state: AgenticSearchState) -> dict:
+    """Replace long raw_content with query-relevant chunks (per-article isolation).
+
+    Each article longer than _CHUNK_THRESHOLD chars is split into chunks, embedded
+    into an ephemeral in-memory Chroma collection, and queried with the search query.
+    The top-k most relevant chunks are joined with a '---' separator and returned as
+    a single result entry (same url and title, replaced raw_content). Keeping one entry
+    per URL avoids silent deduplication in web_search_deduplicate_and_format_sources.
+    On any error, the article is truncated to _CHUNK_THRESHOLD chars instead.
+    """
+    followed_up_queries = state.get("followed_up_queries", [])
+    queries = followed_up_queries if followed_up_queries else state["queries"]
+    filtered_web_results = state["filtered_web_results"]
+
+    embeddings = get_embedding_model()
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50,
+        separators=["\n\n\n", "\n\n", "\n", ""],
+    )
+
+    output = [{"results": []} for _ in filtered_web_results]
+    for q_idx, (query, query_results) in enumerate(zip(queries, filtered_web_results)):
+        for result in query_results["results"]:
+            raw = result.get("raw_content") or ""
+            if len(raw) < _CHUNK_THRESHOLD:
+                output[q_idx]["results"].append(result)
+                continue
+            try:
+                docs = [Document(chunk) for chunk in splitter.split_text(raw)]
+                collection_name = f"chunk_{uuid.uuid4().hex}"  # unique name avoids cross-article conflicts
+                vs = Chroma.from_documents(docs, embeddings, collection_name=collection_name)
+                try:
+                    hits = vs.similarity_search(query, k=5)
+                finally:
+                    try:
+                        vs.delete_collection()  # explicitly release in-memory collection
+                    except Exception:
+                        pass  # collection may already be gone if similarity_search failed
+                if not hits:
+                    output[q_idx]["results"].append({**result, "raw_content": raw[:_CHUNK_THRESHOLD]})
+                else:
+                    chunk_blocks = "\n\n".join(
+                        f"Chunk {i}:\n{hit.page_content}" for i, hit in enumerate(hits, 1)
+                    )
+                    joined = f"[RAG Retrieved Chunks]\n\n{chunk_blocks}"
+                    output[q_idx]["results"].append({**result, "raw_content": joined})
+            except Exception as e:
+                logger.error("chunk_large_articles failed for '%s': %s", result.get("url"), e)
+                output[q_idx]["results"].append({**result, "raw_content": raw[:_CHUNK_THRESHOLD]})
+
+    return {"filtered_web_results": output}
+
+
 class AgenticSearchGraphBuilder:
     def __init__(self):
         self._graph = None
@@ -487,6 +548,7 @@ class AgenticSearchGraphBuilder:
             builder.add_node("generate_queries_from_question", generate_queries_from_question)
             builder.add_node("perform_web_search", perform_web_search)
             builder.add_node("filter_and_format_results", filter_and_format_results)
+            builder.add_node("chunk_large_articles", chunk_large_articles)
             builder.add_node("compress_raw_content", compress_raw_content)
             builder.add_node("aggregate_final_results", aggregate_final_results)
             builder.add_node("synthesize_answer", synthesize_answer)
@@ -497,7 +559,8 @@ class AgenticSearchGraphBuilder:
             builder.add_edge("get_searching_budget", "generate_queries_from_question")
             builder.add_edge("generate_queries_from_question", "perform_web_search")
             builder.add_edge("perform_web_search", "filter_and_format_results")
-            builder.add_edge("filter_and_format_results", "compress_raw_content")
+            builder.add_edge("filter_and_format_results", "chunk_large_articles")
+            builder.add_edge("chunk_large_articles", "compress_raw_content")
             builder.add_edge("compress_raw_content", "aggregate_final_results")
             builder.add_edge("aggregate_final_results", "synthesize_answer")
             builder.add_edge("synthesize_answer", "check_searching_results")

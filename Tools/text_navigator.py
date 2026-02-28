@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import pathlib
-import threading
 from typing import NamedTuple
 
 import omegaconf
@@ -10,49 +9,18 @@ from langchain_community.retrievers import BM25Retriever
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.tools import BaseTool, tool
-from langchain_huggingface import HuggingFaceEmbeddings
 
 from Tools.reader_models import BaseReaderDocument, PDFReaderDocument, SearchResult, sanitize_name
+from Utils.embeddings import _DEFAULT_EMBEDDING_MODEL, get_embedding_model
 
 _PROJECT_ROOT = pathlib.Path(__file__).parent.parent
 _CONFIG_PATH = _PROJECT_ROOT / "retriever_config.yaml"
 _cfg = omegaconf.OmegaConf.load(_CONFIG_PATH)
 _DEFAULT_TOP_K: int = int(_cfg.get("navigator_top_k", 5))
 _DEFAULT_PERSIST_DIR: str = str(_PROJECT_ROOT / str(_cfg.get("navigator_persist_dir", "navigator_tmp")))
-_DEFAULT_EMBEDDING_MODEL: str = str(_cfg.get("embedding_model", "Qwen/Qwen3-Embedding-0.6B"))
 
 logger = logging.getLogger("TextNavigator")
 logger.setLevel(logging.ERROR)
-
-# ---------------------------------------------------------------------------
-# Module-level embedding singleton (thread-safe)
-# ---------------------------------------------------------------------------
-_embedding_state: tuple[str, HuggingFaceEmbeddings] | None = None
-_embedding_lock = threading.Lock()
-
-
-def get_embedding_model(model_name: str = _DEFAULT_EMBEDDING_MODEL) -> HuggingFaceEmbeddings:
-    global _embedding_state
-    state = _embedding_state
-    if state is not None and state[0] == model_name:
-        return state[1]
-    with _embedding_lock:
-        # Double-checked locking
-        state = _embedding_state
-        if state is None or state[0] != model_name:
-            try:
-                new_model = HuggingFaceEmbeddings(model_name=model_name)
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed to load embedding model '{model_name}': {e}. Check network, disk space, or model name."
-                ) from e
-            # Publish name + model together so readers never observe a mixed pair.
-            _embedding_state = (model_name, new_model)
-            state = _embedding_state
-    if state is None:
-        raise RuntimeError("Embedding singleton state unavailable after initialisation.")
-    return state[1]
-
 
 # ---------------------------------------------------------------------------
 # Bookmark type

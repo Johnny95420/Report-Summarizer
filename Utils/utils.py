@@ -3,17 +3,11 @@ import logging
 import math
 import os
 import time
-from copy import deepcopy
 
 import requests
-from langchain_classic.retrievers import EnsembleRetriever
-from langchain_community.retrievers import BM25Retriever
-from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnableLambda
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_litellm import ChatLiteLLM
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from requests.adapters import HTTPAdapter
 from requests.exceptions import ConnectionError, RequestException, Timeout
 from tavily import TavilyClient
@@ -21,10 +15,6 @@ from urllib3.util.retry import Retry
 
 from State.state import Section
 
-host = os.environ.get("SEARCH_HOST", None)
-port = os.environ.get("SEARCH_PORT", None)
-temp_files_path = os.environ.get("TEMP_DIR", "./temp")
-os.makedirs(temp_files_path, exist_ok=True)
 tavily_client = TavilyClient()
 
 
@@ -149,72 +139,6 @@ def track_expanded_context(
         return None
 
 
-class ContentExtractor:
-    def __init__(self, temp_dir=temp_files_path, k=3):
-        self.k = k
-        self.temp_dir = temp_dir
-        # BAAI/bge-m3
-        embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
-        self.docs = [Document("None", metadata={"path": "None", "content": "None"})]
-        self.vectorstore = Chroma.from_documents(
-            documents=self.docs,
-            collection_name="temp_data",
-            embedding=embeddings,
-        )
-        self.bm25_retriever = BM25Retriever.from_documents(self.docs)
-        self.bm25_retriever.k = self.k
-        self.hybrid_retriever = EnsembleRetriever(
-            retrievers=[
-                self.vectorstore.as_retriever(search_kwargs={"k": self.k}),
-                self.bm25_retriever,
-            ],
-            weights=[0.8, 0.2],
-        )
-
-    def update_new_docs(self, files):
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=300,
-            chunk_overlap=50,
-            separators=["\n\n\n\n", "\n\n\n", "\n\n", "\n", ""],
-        )
-        new_docs = []
-        for file in files:
-            with open(file) as f:
-                texts = f.read()
-            name = file.split("/")[-1].replace(".txt", "")
-            new_docs.append(Document(texts, metadata={"path": name, "content": texts}))
-        new_docs = text_splitter.split_documents(new_docs)
-        return new_docs
-
-    def update(self, files):
-        new_docs = self.update_new_docs(files)
-        self.vectorstore.add_documents(new_docs)
-        self.docs.extend(new_docs)
-
-        self.bm25_retriever = BM25Retriever.from_documents(self.docs)
-        self.bm25_retriever.k = self.k
-        self.hybrid_retriever = EnsembleRetriever(
-            retrievers=[
-                self.vectorstore.as_retriever(search_kwargs={"k": self.k}),
-                self.bm25_retriever,
-            ],
-            weights=[0.8, 0.2],
-        )
-
-    def query(self, q):
-        seen, info = set(), []
-        results = self.hybrid_retriever.invoke(q)
-        for res in results:
-            if res.page_content in seen:
-                continue
-            seen.add(res.page_content)
-            expanded_content = track_expanded_context(res.metadata["content"], res.page_content, 1500, 1000)
-            return_res = deepcopy(res)
-            return_res.metadata["content"] = expanded_content
-            info.append(return_res)
-        return info
-
-
 def format_human_feedback(feedbacks: list[str]) -> str:
     """Format a list of human feedbacks into string"""
     formatted_str = ""
@@ -305,13 +229,9 @@ def tavily_search(search_queries, include_raw_content: bool):
     return search_docs
 
 
-content_extractor = ContentExtractor()
-
-
-def selenium_api_search(search_queries, include_raw_content: bool):
+def call_search_engine(search_queries, include_raw_content: bool):
     host = os.environ.get("SEARCH_HOST", None)
     port = os.environ.get("SEARCH_PORT", None)
-    memo = set()
     search_docs = []
 
     # Check if host and port are configured
@@ -379,40 +299,10 @@ def selenium_api_search(search_queries, include_raw_content: bool):
 
         # Process successful response
         if include_raw_content:
-            large_files = []
             for result in output_data.get("results", []):
                 result["title"] = result["title"].replace("/", "_")
                 if result.get("raw_content", "") is None:
                     continue
-                try:
-                    if len(result.get("raw_content", "")) >= 70000:
-                        result["raw_content"] = result["raw_content"][:20000]
-
-                    if len(result.get("raw_content", "")) >= 5000:
-                        file_path = f"{temp_files_path}/{result['title']}.txt"
-                        with open(file_path, "w", encoding="utf-8") as f:
-                            f.write(result["raw_content"])
-                        large_files.append(file_path)
-                        result["raw_content"] = ""
-                except OSError as e:
-                    logger.error(f"Failed to write file for result '{result['title']}': {e}")
-                except Exception as e:
-                    logger.error(f"Unexpected error processing result '{result['title']}': {e}")
-
-            if len(large_files) > 0:
-                content_extractor.update(large_files)
-                search_results = content_extractor.query(query)
-                for idx, results in enumerate(search_results):
-                    if results.metadata["content"] not in memo:
-                        memo.add(results.metadata["content"])
-                        output_data["results"].append(
-                            {
-                                "url": f"{results.metadata['path']}_part{idx}",
-                                "title": results.metadata["path"],
-                                "content": "Raw content part has the most relevant information.",
-                                "raw_content": results.metadata["content"],
-                            }
-                        )
         search_docs.append(output_data)
     return search_docs
 
