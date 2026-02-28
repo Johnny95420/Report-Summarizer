@@ -212,7 +212,7 @@ def perform_web_search(state: AgenticSearchState):
         dedup_results.append({"results": []})
         for result in results["results"]:
             if result["url"] not in url_memo:
-                # Only track real URLs in url_memo; _partN chunk keys are ephemeral
+                # chunk_large_articles reuses original URLs; only register http URLs to avoid duplicate tracking
                 if result["url"].startswith("http"):
                     url_memo.add(result["url"])
                 dedup_results[-1]["results"].append(result)
@@ -289,8 +289,6 @@ async def compress_raw_content(state: AgenticSearchState):
 
     # Increase semaphore: fewer LLM calls after pass-through means higher concurrency is safe
     semaphore = asyncio.Semaphore(4)
-
-    _COMPRESS_CHAR_THRESHOLD = 5000
 
     async def compress_content_with_metadata(query_idx: int, result_idx: int, query: str, result: dict):
         """Compress content with semaphore control and metadata preservation.
@@ -480,7 +478,8 @@ def finalize_answer(state: AgenticSearchState) -> dict:
     )}
 
 
-_CHUNK_THRESHOLD = 5000  # chars; articles shorter than this pass through unchanged
+_CHUNK_THRESHOLD = 5000  # chars; articles shorter than this pass through chunk_large_articles unchanged
+_COMPRESS_CHAR_THRESHOLD = 5000  # chars; content shorter than this passes through compress_raw_content unchanged
 
 
 def chunk_large_articles(state: AgenticSearchState) -> dict:

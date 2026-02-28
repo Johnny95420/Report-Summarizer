@@ -42,6 +42,7 @@ def get_embedding_model(model_name: str = _DEFAULT_EMBEDDING_MODEL) -> HuggingFa
             try:
                 new_model = HuggingFaceEmbeddings(model_name=model_name)
             except Exception as e:
+                logger.error("Failed to load embedding model '%s': %s", model_name, e)
                 raise RuntimeError(f"Failed to load embedding model '{model_name}': {e}") from e
             _embedding_state = (model_name, new_model)
         return _embedding_state[1]

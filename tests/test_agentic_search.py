@@ -4,8 +4,8 @@ import asyncio
 import logging
 from unittest.mock import MagicMock, patch
 
-import pytest
 from langgraph.graph import END
+
 from subagent.agentic_search import (
     aggregate_final_results,
     check_search_quality_async,
@@ -910,10 +910,12 @@ class TestChunkLargeArticles:
         # url and title preserved from original result
         assert all(r["url"] == "http://x.com" for r in results)
         assert all(r["title"] == "T" for r in results)
+        # Collection must be explicitly released after each article
+        mock_vs.delete_collection.assert_called_once()
 
     def test_fallback_on_chroma_error_truncates_to_threshold(self):
         """When Chroma raises, fallback truncates raw_content to _CHUNK_THRESHOLD chars."""
-        from subagent.agentic_search import chunk_large_articles, _CHUNK_THRESHOLD
+        from subagent.agentic_search import _CHUNK_THRESHOLD, chunk_large_articles
 
         long_raw = "x" * 20000
         result_in = {"url": "http://x.com", "title": "T", "content": "C", "raw_content": long_raw}
@@ -965,7 +967,8 @@ class TestChunkLargeArticles:
             patch("subagent.agentic_search.get_embedding_model"),
             patch("subagent.agentic_search.Chroma.from_documents", return_value=mock_vs),
         ):
-            out = chunk_large_articles(state)
+            chunk_large_articles(state)
 
         # similarity_search called with the follow-up query, not original
         mock_vs.similarity_search.assert_called_once_with("follow up query", k=5)
+        mock_vs.delete_collection.assert_called_once()

@@ -232,7 +232,6 @@ def tavily_search(search_queries, include_raw_content: bool):
 def call_search_engine(search_queries, include_raw_content: bool):
     host = os.environ.get("SEARCH_HOST", None)
     port = os.environ.get("SEARCH_PORT", None)
-    memo = set()
     search_docs = []
 
     # Check if host and port are configured
