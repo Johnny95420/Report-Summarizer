@@ -4,6 +4,7 @@ import logging
 import pathlib
 import re
 import sys
+import uuid
 
 # Ensure project root is on sys.path when run as a script (python subagent/agentic_search.py)
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -512,11 +513,15 @@ def chunk_large_articles(state: AgenticSearchState) -> dict:
                 continue
             try:
                 docs = [Document(chunk) for chunk in splitter.split_text(raw)]
-                vs = Chroma.from_documents(docs, embeddings)  # in-memory: no persist_directory
+                collection_name = f"chunk_{uuid.uuid4().hex}"  # unique name avoids cross-article conflicts
+                vs = Chroma.from_documents(docs, embeddings, collection_name=collection_name)
                 try:
                     hits = vs.similarity_search(query, k=5)
                 finally:
-                    vs.delete_collection()  # explicitly release in-memory collection
+                    try:
+                        vs.delete_collection()  # explicitly release in-memory collection
+                    except Exception:
+                        pass  # collection may already be gone if similarity_search failed
                 if not hits:
                     output[q_idx]["results"].append({**result, "raw_content": raw[:_CHUNK_THRESHOLD]})
                 else:
