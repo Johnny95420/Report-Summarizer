@@ -487,9 +487,10 @@ def chunk_large_articles(state: AgenticSearchState) -> dict:
 
     Each article longer than _CHUNK_THRESHOLD chars is split into chunks, embedded
     into an ephemeral in-memory Chroma collection, and queried with the search query.
-    The top-k most relevant chunks replace the original result as independent entries
-    (same url and title, replaced raw_content). On any error, the article is truncated
-    to _CHUNK_THRESHOLD chars instead of passing potentially huge content downstream.
+    The top-k most relevant chunks are joined with a '---' separator and returned as
+    a single result entry (same url and title, replaced raw_content). Keeping one entry
+    per URL avoids silent deduplication in web_search_deduplicate_and_format_sources.
+    On any error, the article is truncated to _CHUNK_THRESHOLD chars instead.
     """
     followed_up_queries = state.get("followed_up_queries", [])
     queries = followed_up_queries if followed_up_queries else state["queries"]
@@ -519,8 +520,8 @@ def chunk_large_articles(state: AgenticSearchState) -> dict:
                 if not hits:
                     output[q_idx]["results"].append({**result, "raw_content": raw[:_CHUNK_THRESHOLD]})
                 else:
-                    for hit in hits:
-                        output[q_idx]["results"].append({**result, "raw_content": hit.page_content})
+                    joined = "\n\n---\n\n".join(hit.page_content for hit in hits)
+                    output[q_idx]["results"].append({**result, "raw_content": joined})
             except Exception as e:
                 logger.error("chunk_large_articles failed for '%s': %s", result.get("url"), e)
                 output[q_idx]["results"].append({**result, "raw_content": raw[:_CHUNK_THRESHOLD]})

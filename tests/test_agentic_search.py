@@ -885,7 +885,7 @@ class TestChunkLargeArticles:
         assert results[0]["raw_content"] == "short"
 
     def test_long_article_replaced_by_chunks(self):
-        """Article with raw_content >= threshold is replaced by top-k chunk entries."""
+        """Article with raw_content >= threshold is replaced by a single concatenated entry."""
         from subagent.agentic_search import chunk_large_articles
 
         long_raw = "word " * 1500  # > 5000 chars
@@ -904,12 +904,11 @@ class TestChunkLargeArticles:
             out = chunk_large_articles(state)
 
         results = out["filtered_web_results"][0]["results"]
-        # Original long entry replaced by 2 chunk entries
-        assert len(results) == 2
-        assert all(r["raw_content"] == "relevant chunk" for r in results)
-        # url and title preserved from original result
-        assert all(r["url"] == "http://x.com" for r in results)
-        assert all(r["title"] == "T" for r in results)
+        # Chunks joined into one entry — URL unchanged, no deduplication risk
+        assert len(results) == 1
+        assert results[0]["raw_content"] == "relevant chunk\n\n---\n\nrelevant chunk"
+        assert results[0]["url"] == "http://x.com"
+        assert results[0]["title"] == "T"
         # Collection must be explicitly released after each article
         mock_vs.delete_collection.assert_called_once()
 

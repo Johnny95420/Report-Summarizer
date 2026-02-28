@@ -12,6 +12,7 @@ import omegaconf
 from langchain_huggingface import HuggingFaceEmbeddings
 
 logger = logging.getLogger("Embeddings")
+logger.setLevel(logging.ERROR)
 
 _cfg = omegaconf.OmegaConf.load(pathlib.Path(__file__).parent.parent / "retriever_config.yaml")
 _DEFAULT_EMBEDDING_MODEL: str = str(_cfg.get("embedding_model", "Qwen/Qwen3-Embedding-0.6B"))
