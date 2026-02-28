@@ -128,12 +128,15 @@ async def test_industry_report_end_to_end():
                     "use_web": True,
                     "use_local_db": False,
                     "max_search_depth": 1,
+                    "agentic_search_iterations": 1,
+                    "agentic_search_queries": 3,
+                    "refine_iteration": 0,
                     "report_structure": "default",
                     "recursion_limit": 100,
                 }
             }
 
-            input_data = ReportStateInput(topic="Test topic", refine_iteration=0)
+            input_data = ReportStateInput(topic="Test topic")
 
             # Phase 1: run until human_feedback interrupt
             interrupted = False

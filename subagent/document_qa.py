@@ -421,7 +421,7 @@ if __name__ == "__main__":
 
     from dotenv import load_dotenv
 
-    load_dotenv()
+    load_dotenv(override=True)
 
     # Verbose logging so iteration progress is visible in the terminal
     logging.basicConfig(
