@@ -513,9 +513,15 @@ def chunk_large_articles(state: AgenticSearchState) -> dict:
             try:
                 docs = [Document(chunk) for chunk in splitter.split_text(raw)]
                 vs = Chroma.from_documents(docs, embeddings)  # in-memory: no persist_directory
-                hits = vs.similarity_search(query, k=5)
-                for hit in hits:
-                    output[q_idx]["results"].append({**result, "raw_content": hit.page_content})
+                try:
+                    hits = vs.similarity_search(query, k=5)
+                finally:
+                    vs.delete_collection()  # explicitly release in-memory collection
+                if not hits:
+                    output[q_idx]["results"].append({**result, "raw_content": raw[:_CHUNK_THRESHOLD]})
+                else:
+                    for hit in hits:
+                        output[q_idx]["results"].append({**result, "raw_content": hit.page_content})
             except Exception as e:
                 logger.error("chunk_large_articles failed for '%s': %s", result.get("url"), e)
                 output[q_idx]["results"].append({**result, "raw_content": raw[:_CHUNK_THRESHOLD]})
