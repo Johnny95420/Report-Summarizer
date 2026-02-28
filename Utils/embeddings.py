@@ -4,11 +4,14 @@ Provides get_embedding_model() with double-checked locking so the
 HuggingFaceEmbeddings instance is initialized at most once per model name
 across all modules (text_navigator, agentic_search, etc.).
 """
+import logging
 import pathlib
 import threading
 
 import omegaconf
 from langchain_huggingface import HuggingFaceEmbeddings
+
+logger = logging.getLogger("Embeddings")
 
 _cfg = omegaconf.OmegaConf.load(pathlib.Path(__file__).parent.parent / "retriever_config.yaml")
 _DEFAULT_EMBEDDING_MODEL: str = str(_cfg.get("embedding_model", "Qwen/Qwen3-Embedding-0.6B"))
