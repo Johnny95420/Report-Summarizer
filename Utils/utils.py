@@ -3,7 +3,9 @@ import logging
 import math
 import os
 import time
+from pathlib import Path
 
+import omegaconf
 import requests
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnableLambda
@@ -14,6 +16,9 @@ from tavily import TavilyClient
 from urllib3.util.retry import Retry
 
 from State.state import Section
+
+_cfg = omegaconf.OmegaConf.load(Path(__file__).parent.parent / "report_config.yaml")
+_MAX_TOKENS: int = int(_cfg.get("MAX_TOKENS", 65536))
 
 tavily_client = TavilyClient()
 
@@ -56,7 +61,7 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     primary = ChatLiteLLM(
         model=model_name,
         temperature=temperature,
-        max_tokens=65536,
+        max_tokens=_MAX_TOKENS,
     )
 
     if tool:
@@ -79,7 +84,7 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     backup = ChatLiteLLM(
         model=backup_model_name,
         temperature=backup_temperature,
-        max_tokens=65536,
+        max_tokens=_MAX_TOKENS,
     )
     if tool:
         backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
@@ -96,7 +101,7 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     primary = ChatLiteLLM(
         model=model_name,
         temperature=temperature,
-        max_tokens=65536,
+        max_tokens=_MAX_TOKENS,
     )
 
     if tool:
@@ -119,7 +124,7 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     backup = ChatLiteLLM(
         model=backup_model_name,
         temperature=backup_temperature,
-        max_tokens=65536,
+        max_tokens=_MAX_TOKENS,
     )
     if tool:
         backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)

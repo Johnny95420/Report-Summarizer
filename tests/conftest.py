@@ -41,6 +41,7 @@ FAKE_CONFIG = {
     "LIGHT_MODEL_NAME": "test-model",
     "BACKUP_LIGHT_MODEL_NAME": "test-model",
     "REPORT_STRUCTURE": "default",
+    "MAX_TOKENS": 65536,
     # retriever config (raw_file_path=None skips data loading)
     "raw_file_path": None,
     "navigator_top_k": 5,

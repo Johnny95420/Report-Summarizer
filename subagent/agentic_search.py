@@ -118,7 +118,7 @@ def select_model_based_on_tokens(content: str, token_threshold: int = 4096) -> t
 
 
 # TODO:The final results are not getting better after applied this node
-def queries_rewriter(queries: list[str]) -> list[str]:
+def queries_rewriter(queries: list[str], gl: str = "tw", hl: str = "zh-tw", time_filter: str = "month") -> dict:
     str_queries = ""
     for idx, q in enumerate(queries):
         str_queries += f"{idx}. {q}\n"
@@ -133,11 +133,15 @@ def queries_rewriter(queries: list[str]) -> list[str]:
         tool_choice="required",
     )
     try:
-        queries = results.tool_calls[0]["args"]["queries"]
+        args = results.tool_calls[0]["args"]
+        queries = args["queries"]
+        gl = args.get("gl", gl)
+        hl = args.get("hl", hl)
+        time_filter = args.get("time_filter", time_filter)
     except (IndexError, KeyError, TypeError) as e:
         logger.error("Failed to parse rewritten queries: %s", e)
-        return queries  # return original queries unchanged
-    return queries
+        return {"queries": queries, "gl": gl, "hl": hl, "time_filter": time_filter}
+    return {"queries": queries, "gl": gl, "hl": hl, "time_filter": time_filter}
 
 
 async def check_search_quality_async(query: str, document: str) -> int:
@@ -155,7 +159,7 @@ async def check_search_quality_async(query: str, document: str) -> int:
     try:
         score = results.tool_calls[0]["args"]["score"]
     except (IndexError, KeyError, TypeError) as e:
-        logger.warning("Failed to parse quality score: %s", e)
+        logger.error("Failed to parse quality score: %s", e)
         score = 0
     return score
 

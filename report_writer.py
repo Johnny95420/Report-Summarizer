@@ -190,8 +190,8 @@ def generate_report_plan(state: ReportState, config: RunnableConfig):
     feedback = state.get("feedback_on_report_plan", None)
     configurable = config["configurable"]
 
-    query_list, time_filter = _generate_planner_queries(topic, feedback, configurable)
-    source_str = _perform_planner_search(query_list, time_filter, configurable)
+    query_list, time_filter, gl, hl = _generate_planner_queries(topic, feedback, configurable)
+    source_str = _perform_planner_search(query_list, time_filter, configurable, gl=gl, hl=hl)
     sections = _generate_report_sections(topic, source_str, feedback, configurable)
 
     refine_iteration = configurable.get("refine_iteration", 1)
@@ -226,10 +226,12 @@ def _generate_planner_queries(topic: str, feedback: str | None, configurable: di
     )
     logger.info("===End report planner query generation.===")
     args = results.tool_calls[0]["args"]
-    return args["queries"], args.get("time_filter", "month")
+    return args["queries"], args.get("time_filter", "month"), args.get("gl", "tw"), args.get("hl", "zh-tw")
 
 
-def _perform_planner_search(queries: list[str], time_filter: str, configurable: dict) -> str:
+def _perform_planner_search(
+    queries: list[str], time_filter: str, configurable: dict, gl: str = "tw", hl: str = "zh-tw"
+) -> str:
     """Execute search and return formatted results."""
     use_web = configurable.get("use_web", False)
     use_local_db = configurable.get("use_local_db", False)
@@ -245,7 +247,7 @@ def _perform_planner_search(queries: list[str], time_filter: str, configurable: 
         source_str = format_search_results_with_metadata(results)
 
     if use_web:
-        web_results = call_search_engine(queries, False, time_filter=time_filter)
+        web_results = call_search_engine(queries, False, time_filter=time_filter, gl=gl, hl=hl)
         source_str2 = web_search_deduplicate_and_format_sources(web_results, False)
         source_str = source_str + "===\n\n" + source_str2
 

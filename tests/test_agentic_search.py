@@ -25,28 +25,37 @@ from subagent.agentic_search import (
 # ---------------------------------------------------------------------------
 class TestQueriesRewriterGuard:
     def test_returns_original_on_empty_tool_calls(self):
-        """When tool_calls is empty, should return original queries unchanged."""
+        """When tool_calls is empty, should return dict with original queries unchanged."""
         mock_result = MagicMock()
         mock_result.tool_calls = []
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             result = queries_rewriter(["query A", "query B"])
-        assert result == ["query A", "query B"]
+        assert result["queries"] == ["query A", "query B"]
+        assert "gl" in result
+        assert "hl" in result
+        assert "time_filter" in result
 
     def test_returns_original_on_missing_args_key(self):
-        """When tool_calls[0] has no 'queries' key in args, should return original."""
+        """When tool_calls[0] has no 'queries' key in args, should return dict with original."""
         mock_result = MagicMock()
         mock_result.tool_calls = [{"args": {"wrong_key": "value"}}]
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             result = queries_rewriter(["original"])
-        assert result == ["original"]
+        assert result["queries"] == ["original"]
+        assert "gl" in result
+        assert "hl" in result
+        assert "time_filter" in result
 
     def test_returns_rewritten_on_success(self):
-        """Normal path: should return the rewritten queries."""
+        """Normal path: should return dict with rewritten queries and search params."""
         mock_result = MagicMock()
         mock_result.tool_calls = [{"args": {"queries": ["rewritten A", "rewritten B"]}}]
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             result = queries_rewriter(["query A", "query B"])
-        assert result == ["rewritten A", "rewritten B"]
+        assert result["queries"] == ["rewritten A", "rewritten B"]
+        assert "gl" in result
+        assert "hl" in result
+        assert "time_filter" in result
 
 
 # ---------------------------------------------------------------------------

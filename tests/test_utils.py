@@ -25,10 +25,10 @@ def _utils_source():
 # ---------------------------------------------------------------------------
 
 class TestMaxTokensConfig:
-    """call_llm and call_llm_async must set max_tokens=65536 on every ChatLiteLLM instance."""
+    """call_llm and call_llm_async must set max_tokens=_MAX_TOKENS on every ChatLiteLLM instance."""
 
     def _count_chatlitellm_max_tokens(self, func_node):
-        """Return the set of max_tokens values passed to ChatLiteLLM inside a function."""
+        """Return the max_tokens values (constant or variable name) passed to ChatLiteLLM inside a function."""
         values = []
         for node in ast.walk(func_node):
             if not isinstance(node, ast.Call):
@@ -42,6 +42,8 @@ class TestMaxTokensConfig:
                 if kw.arg == "max_tokens":
                     if isinstance(kw.value, ast.Constant):
                         values.append(kw.value.value)
+                    elif isinstance(kw.value, ast.Name):
+                        values.append(kw.value.id)
         return values
 
     def test_call_llm_primary_max_tokens(self):
@@ -51,7 +53,7 @@ class TestMaxTokensConfig:
         values = self._count_chatlitellm_max_tokens(func)
         assert len(values) >= 2, f"Expected >=2 ChatLiteLLM instances in call_llm, got {len(values)}"
         for v in values:
-            assert v == 65536, f"ChatLiteLLM max_tokens should be 65536, got {v}"
+            assert v == "_MAX_TOKENS", f"ChatLiteLLM max_tokens should be _MAX_TOKENS, got {v}"
 
     def test_call_llm_async_max_tokens(self):
         tree = _parse_utils()
@@ -60,7 +62,12 @@ class TestMaxTokensConfig:
         values = self._count_chatlitellm_max_tokens(func)
         assert len(values) >= 2, f"Expected >=2 ChatLiteLLM instances in call_llm_async, got {len(values)}"
         for v in values:
-            assert v == 65536, f"ChatLiteLLM max_tokens should be 65536, got {v}"
+            assert v == "_MAX_TOKENS", f"ChatLiteLLM max_tokens should be _MAX_TOKENS, got {v}"
+
+    def test_max_tokens_loaded_from_config(self):
+        source = _utils_source()
+        assert "_MAX_TOKENS" in source
+        assert 'get("MAX_TOKENS"' in source or "get('MAX_TOKENS'" in source
 
 
 # ---------------------------------------------------------------------------
