@@ -79,22 +79,44 @@ def summary_formatter(summary_content: str) -> dict:
 
 
 @tool
-def queries_formatter(thought: str, queries: list[str]) -> dict:
+def queries_formatter(
+    thought: str,
+    queries: list[str],
+    gl: str = "tw",
+    hl: str = "zh-tw",
+    time_filter: str = "month",
+) -> dict:
     """Package a search strategy and list of queries into structured format.
 
     [Agent Instruction]
     Call this tool once after deciding which queries to run.
     The queries field must be a list of strings — not a single string or comma-separated values.
     Each element is a complete standalone keyword-based search string.
+    Set gl and hl based on the dominant topic language:
+    - Taiwan/Chinese topics: gl="tw", hl="zh-tw" (default)
+    - International/US/Europe/Global topics: gl="us", hl="en"
+
+    Set time_filter based on how recent the required data must be:
+    - "day"   : Breaking news, intraday price movements, same-day announcements
+    - "week"  : Recent earnings releases, weekly market reviews, last 7 days
+    - "month" : Monthly reports, recent policy changes, last 30 days (default)
+    - "year"  : Annual trends, yearly comparisons, last 12 months
+    - "all"   : Timeless fundamentals, historical data, company profiles — no time restriction
 
     Args:
         thought (str): Brief explanation of the search strategy (1-2 sentences).
         queries (list[str]): List of keyword-based search query strings.
+        gl (str): Country code for search results. Use "tw" for Taiwan/Chinese topics,
+            "us" for international/English topics. Defaults to "tw".
+        hl (str): Language for search results. Use "zh-tw" for Traditional Chinese,
+            "en" for English. Defaults to "zh-tw".
+        time_filter (str): Recency filter. One of "day", "week", "month", "year", "all".
+            Defaults to "month".
 
     Returns:
-        dict: {"search_queries": list[str]}
+        dict: {"search_queries": list[str], "gl": str, "hl": str, "time_filter": str}
     """
-    return {"search_queries": queries}
+    return {"search_queries": queries, "gl": gl, "hl": hl, "time_filter": time_filter}
 
 
 @tool

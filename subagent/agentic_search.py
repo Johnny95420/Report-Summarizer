@@ -182,14 +182,21 @@ def generate_queries_from_question(state: AgenticSearchState):
         tool_choice="required",
     )
     try:
-        queries = result.tool_calls[0]["args"]["queries"]
+        args = result.tool_calls[0]["args"]
+        queries = args["queries"]
+        gl = args.get("gl", "tw")
+        hl = args.get("hl", "zh-tw")
+        time_filter = args.get("time_filter", "month")
     except (IndexError, KeyError, TypeError) as e:
         logger.error("Failed to parse queries from question: %s", e)
         # Fallback: use the question itself as a single query
         queries = [question]
+        gl = "tw"
+        hl = "zh-tw"
+        time_filter = "month"
 
-    logger.info("Generated %d queries from question", len(queries))
-    return {"queries": queries}
+    logger.info("Generated %d queries from question (gl=%s, hl=%s, time_filter=%s)", len(queries), gl, hl, time_filter)
+    return {"queries": queries, "gl": gl, "hl": hl, "time_filter": time_filter}
 
 
 def perform_web_search(state: AgenticSearchState):
@@ -207,7 +214,10 @@ def perform_web_search(state: AgenticSearchState):
         queries = state["queries"]
         logger.info(f"Performing web search for queries: {queries}")
 
-    web_results = call_search_engine(queries, True)
+    gl = state.get("gl", "tw")
+    hl = state.get("hl", "zh-tw")
+    time_filter = state.get("time_filter", "month")
+    web_results = call_search_engine(queries, True, time_filter=time_filter, gl=gl, hl=hl)
     dedup_results = []
     for results in web_results:
         dedup_results.append({"results": []})

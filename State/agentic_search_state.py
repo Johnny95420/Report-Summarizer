@@ -22,3 +22,9 @@ class AgenticSearchState(TypedDict):
     # Append-only registry of {title, url} for all quality-passed sources.
     # Position + 1 = stable citation number [N] across iterations.
     source_registry: Annotated[list[dict], operator.add]
+    # Search locale determined by query language; defaults: gl="tw", hl="zh-tw"
+    gl: str
+    hl: str
+    # Search time range chosen by the LLM; "all" means no restriction
+    # Valid values: "day" | "week" | "month" | "year" | "all"
+    time_filter: str
