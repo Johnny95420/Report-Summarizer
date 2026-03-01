@@ -172,7 +172,7 @@ class TestFollowedUpQueriesDefault:
             result = perform_web_search(state)
         assert result["curr_num_iterations"] == 1
         # Should have searched with original queries, not empty string
-        mock_search.assert_called_once_with(["test query"], True)
+        mock_search.assert_called_once_with(["test query"], True, time_filter="month", gl="tw", hl="zh-tw")
 
     def test_perform_web_search_with_followed_up_queries(self):
         """When followed_up_queries is present and non-empty, use it instead of queries."""
@@ -184,7 +184,7 @@ class TestFollowedUpQueriesDefault:
         }
         with patch("subagent.agentic_search.call_search_engine", return_value=[{"results": []}]) as mock_search:
             perform_web_search(state)
-        mock_search.assert_called_once_with(["follow up query"], True)
+        mock_search.assert_called_once_with(["follow up query"], True, time_filter="month", gl="tw", hl="zh-tw")
 
     def test_url_memo_returned_in_state(self):
         """url_memo must be included in the return dict so LangGraph persists it across iterations."""

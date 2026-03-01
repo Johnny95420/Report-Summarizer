@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # ---------------------------------------------------------------------------
 def pytest_configure(config):
     config.addinivalue_line("markers", "integration: integration tests that run without external services")
+    config.addinivalue_line("markers", "real_api: tests that make live API calls and require valid credentials in .env")
 
 
 # ---------------------------------------------------------------------------

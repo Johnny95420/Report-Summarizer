@@ -336,7 +336,7 @@ class TestSourceRegistryIntegration:
 
         call_count = {"n": 0}
 
-        def fake_search(queries, raw):
+        def fake_search(queries, raw, **kwargs):
             call_count["n"] += 1
             return iter1_result if call_count["n"] == 1 else iter2_result
 
