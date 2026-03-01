@@ -23,6 +23,12 @@ The queries should:
 3. In Traditional Chinese
 
 Make the queries specific enough to find high-quality, relevant sources while covering the breadth needed for the report structure.
+
+Set time_filter in the queries_formatter based on the report topic:
+- "day" / "week" : Breaking news or very recent announcements
+- "month"        : Recent developments, last 30 days (default)
+- "year"         : Annual trends, sector overviews, last 12 months
+- "all"          : Timeless background, company/product profiles, historical data
 </Task>
 
 <Feedback>
@@ -79,28 +85,57 @@ Here is feedback on the report structure from review (if any):
     + f"<Current Time> {curr_date} </Current Time>"
 )
 
-query_writer_instructions = (
+section_question_instructions = (
     """You are an expert financial and investment researcher generating a structured research question for a report section.
 
 <Task>
 Generate ONE main research question with at most 5 sub-questions that together comprehensively cover the section topic.
 The question will be handed off to a research sub-agent that will search the web and answer it directly.
+The sub-agent has NO access to the section description — every piece of context it needs (entities, time intervals, key metrics) must be explicitly stated inside the question text itself.
 </Task>
+
+<Time Awareness — Critical>
+Before writing any question, scan the Section Topic for an explicit time interval (e.g., "Q3 2024", "2024年上半年", "近六個月", "2024全年").
+
+**If a target interval is found:**
+- Extract it and state it in full precision inside every question and sub-question. Include both the label AND the calendar range when possible.
+  - Good: "2024年第三季（2024年7月至9月）期間，…"
+  - Bad:  "近期" or "最近" (too vague for the sub-agent)
+- The main question MUST explicitly scope to that interval.
+- Sub-questions must focus on specific events, data releases, earnings, policy decisions, or milestones that occurred WITHIN that interval.
+- Historical or long-term context sub-questions are allowed only if directly needed to interpret the interval data, and must be labeled as "background".
+
+**If no explicit interval is found:**
+- Default to the past 6–12 months. State the approximate window explicitly (e.g., "2024年至今" or "過去一年（2024–2025）").
+- At least one sub-question must ask for the most recent available quantitative data points.
+</Time Awareness — Critical>
+
+<Iteration Strategy — Critical>
+Determine which iteration this is:
+
+**First iteration** — weakness is EMPTY and question history is EMPTY:
+- The goal is MAXIMUM BREADTH. The sub-agent should return diverse, wide-ranging content to give the report writer rich material to build a comprehensive first draft.
+- Frame the main question as a broad survey: "During [time interval], what were the key developments, major events, and most important data points related to [topic]?"
+- Sub-questions must span as many DISTINCT dimensions as possible, for example:
+  * Quantitative performance (financial results, market share, shipment volumes, key KPIs)
+  * Major corporate events (product launches, M&A, management changes, capacity expansions)
+  * Macro or policy context (regulation changes, government policies, interest rate decisions)
+  * Competitive landscape (competitor moves, market positioning shifts)
+  * Risks, challenges, or controversies raised during the period
+  * Forward-looking indicators or guidance issued during the period
+- Do NOT drill into a single narrow angle on the first question.
+
+**Follow-up iteration** — weakness is provided OR question history is non-empty:
+- The goal is TARGETED GAP-FILLING. Generate a precise, narrow question that directly addresses the specific weakness.
+- Do not repeat any question already in {question_history}.
+</Iteration Strategy — Critical>
 
 <Output Format>
 Your output must follow this exact structure:
-Main Question: [The primary research question — specific, actionable, time-aware]
-- Sub-question 1: [A distinct aspect not covered by the main question]
-- Sub-question 2: [Another distinct aspect]
+Main Question: [Broad survey (first iteration) or targeted gap-filling (follow-up) — always includes explicit entity names and time interval]
+- Sub-question 1: [Distinct dimension — with explicit time scope if applicable]
+- Sub-question 2: [Another distinct dimension]
 ... (at most 5 sub-questions)
-
-Rules:
-- The main question must be the most important, overarching research need for this section.
-- Each sub-question must cover a DIFFERENT dimension (e.g., financial metrics, competitive landscape, risk factors, technical specs, regulatory environment).
-- Avoid redundancy between main question and sub-questions.
-- Be specific: include entity names, time periods, and key metrics where relevant.
-- If {weakness} is empty, generate the initial question from the section topic.
-- If {weakness} is provided, generate the NEXT question that addresses the described gap; do not repeat questions already in {question_history}.
 </Output Format>
 
 <Language Rules>
@@ -135,10 +170,14 @@ Your job is to craft a section of a professional report that is clear, logically
 2.  **Initial Draft**: If `Existing section content` is empty, create the first draft of the section based on the `Source material`.
 3.  **Refine and Deepen**: If `Existing section content` exists, your goal is to enhance, deepen, and refine it using the new `Source material` and `Follow-up questions`, not just append new information.
 4.  **Prioritize Timeliness**: Give strong preference to the most recent sources provided in the `<Source material>`. When discussing trends or data, always be mindful of the source's date. Avoid presenting outdated information as if it were current. If older data is necessary for historical context, explicitly state its time frame.
+5.  **Target Interval First — Critical**: Scan the `<Section topic>` for any explicit time interval (e.g., "Q3 2024", "2024年上半年", "近六個月", "過去一年").
+    - If found: the section content MUST be primarily built on data and events from within that interval. Long-term or historical information may appear only as background context, and must be explicitly labeled as such (e.g., "作為背景，…").
+    - Do NOT let general long-term trends crowd out or replace the interval-specific facts the reader actually needs.
+6.  **Comprehensive Coverage of Important Events**: "Comprehensive" means covering all significant events, data releases, policy decisions, and milestones relevant to the topic — not just summarizing one or two highlights. Each important event or metric mentioned in the source material should be addressed, even briefly.
 </Guidelines for writing>
 
 <Length and style>
-- Strict 100-1000 word limit (excluding title, sources ,mathematical formulas and tables or pictures)
+- Strict 500-2000 word limit. The following do NOT count toward the limit and may be as long as needed: section title, the entire `### Sources` block (all citation entries), mathematical formulas, and tables or pictures
 - Start with your most important key point in **bold**
 - Prefer quantitative metrics over qualitative adjectives in the description
 - Writing in simple, clear language. Avoid marketing language; maintain a neutral tone
@@ -202,13 +241,15 @@ Your job is to craft a section of a professional report that is clear, logically
 </Citation and Language Guidelines>
 
 <Quality checks>
-- Exactly 100-1000 word limit (excluding title, sources ,mathematical formulas and tables or pictures)
+- Exactly 500-2000 word limit (the entire `### Sources` block, section title, mathematical formulas, and tables or pictures do NOT count)
 - Careful use of structural element (table or list) and only if it helps clarify your point
 - Starts with bold insight
 - No preamble prior to creating the section content
 - Sources cited at end
 - All key data, statistics, and claims are supported by numbered inline citations `[N]`, with multiple sources cited for synthesized information where applicable.
 - Timeliness of information is prioritized; outdated data is contextualized correctly.
+- If the section topic specifies a target time interval, content is primarily drawn from within that interval; any out-of-interval data is labeled as background context.
+- All significant events and data points from the source material relevant to the topic are covered — not just one or two highlights.
 - Use traditional chinese to write the report
 - Use quantitative metrics(if exist)
 - Only contain relevant information

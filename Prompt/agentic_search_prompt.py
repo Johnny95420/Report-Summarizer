@@ -74,6 +74,12 @@ Futures:
 - Global/US/Europe/Asia topics: English
 </Language Rules>
 
+<Search Locale>
+Set gl and hl in the queries_formatter to match the dominant topic:
+- Taiwan/Chinese queries: gl="tw", hl="zh-tw"
+- International/English queries: gl="us", hl="en"
+</Search Locale>
+
 <Execution Rules>
 1. Output format: Flat list of rewritten queries only (no explanations)
 2. For each original query, generate 1-2 rewritten queries
@@ -109,6 +115,23 @@ that together comprehensively cover all aspects of the question.
 - Taiwan-only topics: Traditional Chinese
 - Global/US/Europe/Asia topics: English
 </Language Rules>
+
+<Search Locale>
+Set gl and hl in the queries_formatter to match the dominant topic:
+- Taiwan/Chinese queries: gl="tw", hl="zh-tw"
+- International/English queries: gl="us", hl="en"
+</Search Locale>
+
+<Time Filter>
+Set time_filter in the queries_formatter based on how recent the required data must be:
+- "day"   : Breaking news, intraday price movements, same-day announcements
+- "week"  : Recent earnings releases, weekly market reviews, last 7 days
+- "month" : Monthly reports, recent policy changes, last 30 days (default)
+- "year"  : Annual trends, sector overviews, last 12 months
+- "all"   : Timeless fundamentals, historical background, company/product profiles
+
+Choose the WIDEST window that still satisfies the question. When in doubt, prefer "year" over "month" to avoid missing relevant context.
+</Time Filter>
 
 <Research Question>
 {question}
