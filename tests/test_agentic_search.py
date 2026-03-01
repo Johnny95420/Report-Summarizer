@@ -25,28 +25,37 @@ from subagent.agentic_search import (
 # ---------------------------------------------------------------------------
 class TestQueriesRewriterGuard:
     def test_returns_original_on_empty_tool_calls(self):
-        """When tool_calls is empty, should return original queries unchanged."""
+        """When tool_calls is empty, should return dict with original queries unchanged."""
         mock_result = MagicMock()
         mock_result.tool_calls = []
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             result = queries_rewriter(["query A", "query B"])
-        assert result == ["query A", "query B"]
+        assert result["queries"] == ["query A", "query B"]
+        assert "gl" in result
+        assert "hl" in result
+        assert "time_filter" in result
 
     def test_returns_original_on_missing_args_key(self):
-        """When tool_calls[0] has no 'queries' key in args, should return original."""
+        """When tool_calls[0] has no 'queries' key in args, should return dict with original."""
         mock_result = MagicMock()
         mock_result.tool_calls = [{"args": {"wrong_key": "value"}}]
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             result = queries_rewriter(["original"])
-        assert result == ["original"]
+        assert result["queries"] == ["original"]
+        assert "gl" in result
+        assert "hl" in result
+        assert "time_filter" in result
 
     def test_returns_rewritten_on_success(self):
-        """Normal path: should return the rewritten queries."""
+        """Normal path: should return dict with rewritten queries and search params."""
         mock_result = MagicMock()
         mock_result.tool_calls = [{"args": {"queries": ["rewritten A", "rewritten B"]}}]
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             result = queries_rewriter(["query A", "query B"])
-        assert result == ["rewritten A", "rewritten B"]
+        assert result["queries"] == ["rewritten A", "rewritten B"]
+        assert "gl" in result
+        assert "hl" in result
+        assert "time_filter" in result
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +181,7 @@ class TestFollowedUpQueriesDefault:
             result = perform_web_search(state)
         assert result["curr_num_iterations"] == 1
         # Should have searched with original queries, not empty string
-        mock_search.assert_called_once_with(["test query"], True)
+        mock_search.assert_called_once_with(["test query"], True, time_filter="month", gl="tw", hl="zh-tw")
 
     def test_perform_web_search_with_followed_up_queries(self):
         """When followed_up_queries is present and non-empty, use it instead of queries."""
@@ -184,7 +193,7 @@ class TestFollowedUpQueriesDefault:
         }
         with patch("subagent.agentic_search.call_search_engine", return_value=[{"results": []}]) as mock_search:
             perform_web_search(state)
-        mock_search.assert_called_once_with(["follow up query"], True)
+        mock_search.assert_called_once_with(["follow up query"], True, time_filter="month", gl="tw", hl="zh-tw")
 
     def test_url_memo_returned_in_state(self):
         """url_memo must be included in the return dict so LangGraph persists it across iterations."""

@@ -3,7 +3,9 @@ import logging
 import math
 import os
 import time
+from pathlib import Path
 
+import omegaconf
 import requests
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnableLambda
@@ -14,6 +16,9 @@ from tavily import TavilyClient
 from urllib3.util.retry import Retry
 
 from State.state import Section
+
+_cfg = omegaconf.OmegaConf.load(Path(__file__).parent.parent / "report_config.yaml")
+_MAX_TOKENS: int = int(_cfg.get("MAX_TOKENS", 65536))
 
 tavily_client = TavilyClient()
 
@@ -56,6 +61,7 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     primary = ChatLiteLLM(
         model=model_name,
         temperature=temperature,
+        max_tokens=_MAX_TOKENS,
     )
 
     if tool:
@@ -64,8 +70,13 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     def _validate_tool_calls(msg):
         if tool and tool_choice == "required" and not getattr(msg, "tool_calls", None):
             raise ValueError("Required tool call missing")
-        if not (getattr(msg, "content", None) or getattr(msg, "tool_calls", None)):
+        content = getattr(msg, "content", None)
+        effective_content = content.strip() if isinstance(content, str) else content
+        if not (effective_content or getattr(msg, "tool_calls", None)):
             raise ValueError("Empty model output")
+        finish_reason = (getattr(msg, "response_metadata", None) or {}).get("finish_reason")
+        if finish_reason in ("length", "max_tokens"):
+            raise ValueError("Output truncated by token limit")
         return msg
 
     validated_primary = primary | RunnableLambda(_validate_tool_calls)
@@ -73,6 +84,7 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     backup = ChatLiteLLM(
         model=backup_model_name,
         temperature=backup_temperature,
+        max_tokens=_MAX_TOKENS,
     )
     if tool:
         backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
@@ -89,6 +101,7 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     primary = ChatLiteLLM(
         model=model_name,
         temperature=temperature,
+        max_tokens=_MAX_TOKENS,
     )
 
     if tool:
@@ -97,8 +110,13 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     def _validate_tool_calls(msg):
         if tool and tool_choice == "required" and not getattr(msg, "tool_calls", None):
             raise ValueError("Required tool call missing")
-        if not (getattr(msg, "content", None) or getattr(msg, "tool_calls", None)):
+        content = getattr(msg, "content", None)
+        effective_content = content.strip() if isinstance(content, str) else content
+        if not (effective_content or getattr(msg, "tool_calls", None)):
             raise ValueError("Empty model output")
+        finish_reason = (getattr(msg, "response_metadata", None) or {}).get("finish_reason")
+        if finish_reason in ("length", "max_tokens"):
+            raise ValueError("Output truncated by token limit")
         return msg
 
     validated_primary = primary | RunnableLambda(_validate_tool_calls)
@@ -106,6 +124,7 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     backup = ChatLiteLLM(
         model=backup_model_name,
         temperature=backup_temperature,
+        max_tokens=_MAX_TOKENS,
     )
     if tool:
         backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
@@ -229,7 +248,13 @@ def tavily_search(search_queries, include_raw_content: bool):
     return search_docs
 
 
-def call_search_engine(search_queries, include_raw_content: bool):
+def call_search_engine(
+    search_queries,
+    include_raw_content: bool,
+    time_filter: str = "month",
+    gl: str = "tw",
+    hl: str = "zh-tw",
+):
     host = os.environ.get("SEARCH_HOST", None)
     port = os.environ.get("SEARCH_PORT", None)
     search_docs = []
@@ -247,15 +272,20 @@ def call_search_engine(search_queries, include_raw_content: bool):
             try:
                 logger.info(f"Searching query: {query}, attempt {attempt + 1}")
 
+                params = {
+                    "query": query,
+                    "include_raw_content": include_raw_content,
+                    "max_results": 10,
+                    "timeout": 180,
+                    "gl": gl,
+                    "hl": hl,
+                }
+                if time_filter != "all":
+                    params["time_filter"] = time_filter
                 output = http_session.get(
                     f"http://{host}:{port}/search_and_crawl",
-                    params={
-                        "query": query,
-                        "include_raw_content": include_raw_content,
-                        "max_results": 10,
-                        "timeout": 600,
-                    },
-                    timeout=600,  # Give slightly more time than the service timeout
+                    params=params,
+                    timeout=210,  # Give slightly more time than the service timeout
                 )
                 output.raise_for_status()  # Raise exception for HTTP errors
 

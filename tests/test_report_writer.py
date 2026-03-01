@@ -62,7 +62,7 @@ class TestExplicitPromptImports:
     EXPECTED_NAMES = [
         "report_planner_query_writer_instructions",
         "report_planner_instructions",
-        "query_writer_instructions",
+        "section_question_instructions",
         "section_writer_instructions",
         "section_grader_instructions",
         "final_section_writer_instructions",
