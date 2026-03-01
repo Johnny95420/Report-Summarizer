@@ -201,7 +201,7 @@ class TestAgenticSearchGraphUrlMemoPropagation:
                 return await agentic_search_graph.ainvoke(
                     {
                         "question": "What are the key facts about this topic?",
-                        "url_memo": set(),
+                        "url_memo": [],
                         "source_registry": [],
                     }
                 )

@@ -173,7 +173,7 @@ class TestFollowedUpQueriesDefault:
         """Missing followed_up_queries key should default to [] not '' (I10 fix)."""
         state = {
             "queries": ["test query"],
-            "url_memo": set(),
+            "url_memo": [],
             "curr_num_iterations": 0,
             # followed_up_queries intentionally absent
         }
@@ -188,7 +188,7 @@ class TestFollowedUpQueriesDefault:
         state = {
             "queries": ["original"],
             "followed_up_queries": ["follow up query"],
-            "url_memo": set(),
+            "url_memo": [],
             "curr_num_iterations": 0,
         }
         with patch("subagent.agentic_search.call_search_engine", return_value=[{"results": []}]) as mock_search:
@@ -199,7 +199,7 @@ class TestFollowedUpQueriesDefault:
         """url_memo must be included in the return dict so LangGraph persists it across iterations."""
         state = {
             "queries": ["q1"],
-            "url_memo": set(),
+            "url_memo": [],
             "curr_num_iterations": 0,
         }
         fake_results = [{"results": [{"url": "http://a.com", "title": "A", "content": "c", "raw_content": "r"}]}]
@@ -213,7 +213,7 @@ class TestFollowedUpQueriesDefault:
         seen_url = "http://dup.com"
         state_iter1 = {
             "queries": ["q1"],
-            "url_memo": set(),
+            "url_memo": [],
             "curr_num_iterations": 0,
         }
         fake_results = [{"results": [{"url": seen_url, "title": "T", "content": "c", "raw_content": "r"}]}]
@@ -235,7 +235,7 @@ class TestFollowedUpQueriesDefault:
         """url_memo pre-seeded with one URL: that URL is filtered, new URL passes through."""
         state = {
             "queries": ["q1"],
-            "url_memo": {"http://seen.com"},
+            "url_memo": ["http://seen.com"],
             "curr_num_iterations": 1,
         }
         fake_results = [{"results": [
@@ -250,6 +250,54 @@ class TestFollowedUpQueriesDefault:
         assert "http://new.com" in urls_in_results
         assert "http://seen.com" in result["url_memo"]
         assert "http://new.com" in result["url_memo"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #21 — WebResult / WebResultBatch TypedDict schema
+# ---------------------------------------------------------------------------
+class TestWebResultTypedDicts:
+    def test_importable(self):
+        """WebResult and WebResultBatch must be importable from State.agentic_search_state."""
+        from State.agentic_search_state import WebResult, WebResultBatch  # noqa: F401
+
+    def test_web_result_required_keys(self):
+        """WebResult must declare the four required keys used throughout agentic_search nodes."""
+        from State.agentic_search_state import WebResult
+        required = {"title", "content", "raw_content", "url"}
+        # __required_keys__ is set by TypedDict for non-NotRequired fields
+        assert required <= WebResult.__required_keys__, (
+            f"WebResult missing required keys: {required - WebResult.__required_keys__}"
+        )
+
+    def test_web_result_score_is_optional(self):
+        """score must be NotRequired so results without a score are valid."""
+        from State.agentic_search_state import WebResult
+        assert "score" in WebResult.__optional_keys__, "score must be NotRequired in WebResult"
+
+    def test_web_result_batch_has_results_key(self):
+        """WebResultBatch must declare a 'results' key."""
+        from State.agentic_search_state import WebResultBatch
+        assert "results" in WebResultBatch.__required_keys__
+
+    def test_state_parallel_list_fields_use_web_result_batch(self):
+        """web_results, filtered_web_results, compressed_web_results must be list[WebResultBatch]."""
+        import ast
+        from .conftest import ROOT
+        source = (ROOT / "State" / "agentic_search_state.py").read_text()
+        tree = ast.parse(source)
+        # Collect annotated field names inside AgenticSearchState
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "AgenticSearchState":
+                for stmt in node.body:
+                    if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                        field = stmt.target.id
+                        if field in ("web_results", "filtered_web_results", "compressed_web_results"):
+                            annotation = ast.unparse(stmt.annotation)
+                            assert "WebResultBatch" in annotation, (
+                                f"{field} annotation should reference WebResultBatch, got: {annotation}"
+                            )
+                return
+        raise AssertionError("AgenticSearchState class not found in agentic_search_state.py")
 
 
 # ---------------------------------------------------------------------------

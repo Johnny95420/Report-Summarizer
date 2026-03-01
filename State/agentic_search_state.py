@@ -1,5 +1,17 @@
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
+
+
+class WebResult(TypedDict):
+    title: str
+    content: str
+    raw_content: str
+    url: str
+    score: NotRequired[int]
+
+
+class WebResultBatch(TypedDict):
+    results: list[WebResult]
 
 
 class AgenticSearchState(TypedDict):
@@ -8,9 +20,10 @@ class AgenticSearchState(TypedDict):
     # Search queries generated internally by generate_queries_from_question
     queries: list[str]
     followed_up_queries: list[str]
-    web_results: list[dict]
-    filtered_web_results: list[dict]
-    compressed_web_results: list[dict]
+    # Parallel lists — must all have len == len(queries); zip() silently truncates if they differ
+    web_results: list[WebResultBatch]
+    filtered_web_results: list[WebResultBatch]
+    compressed_web_results: list[WebResultBatch]
     # Current iteration's formatted search results (reset each round)
     materials: str
     # Iteratively updated answer with inline citations (persists across rounds)
@@ -18,7 +31,7 @@ class AgenticSearchState(TypedDict):
     max_num_iterations: int
     curr_num_iterations: int
     num_queries: int
-    url_memo: set[str]
+    url_memo: list[str]
     # Append-only registry of {title, url} for all quality-passed sources.
     # Position + 1 = stable citation number [N] across iterations.
     source_registry: Annotated[list[dict], operator.add]

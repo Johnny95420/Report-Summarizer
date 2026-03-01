@@ -204,7 +204,7 @@ def generate_queries_from_question(state: AgenticSearchState):
 
 
 def perform_web_search(state: AgenticSearchState):
-    url_memo = state.get("url_memo", set())
+    url_memo = set(state.get("url_memo", []))
     queries = state["queries"]
     curr_num_iterations = state.get("curr_num_iterations", 0)
     followed_up_queries = state.get("followed_up_queries", [])
@@ -235,7 +235,7 @@ def perform_web_search(state: AgenticSearchState):
     return {
         "web_results": dedup_results,
         "curr_num_iterations": curr_num_iterations + 1,
-        "url_memo": url_memo,
+        "url_memo": list(url_memo),
     }
 
 
@@ -612,7 +612,7 @@ if __name__ == "__main__":
         t_start = t_prev
 
         async for event in agentic_search_graph.astream(
-            {"question": question, "url_memo": set(), "source_registry": [], "max_num_iterations": num_iterations},
+            {"question": question, "url_memo": [], "source_registry": [], "max_num_iterations": num_iterations},
             stream_mode="updates",
         ):
             t_now = time.perf_counter()
