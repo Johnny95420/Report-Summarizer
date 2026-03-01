@@ -468,7 +468,7 @@ For "content":
    - **Remove Misplaced Information**: You must remove information that clearly belongs in a different section. This is critical for keeping each section focused and avoiding clutter.
 2) **Cross-Section Consistency**: Avoid repeating material from other sections; if necessary, use a brief cross-reference (e.g., “詳見 other_section_name”) instead of duplicating text.
 3) **Style and Formatting**:
-    - **Word Count**: 100-1000 word limit (excluding title, sources, mathematical formulas, tables, or pictures).
+    - **Word Count**: 500-2000 word limit (excluding title, sources, mathematical formulas, tables, or pictures).
     - **Opening**: Start with your most important key point in **bold**.
     - **Tone & Focus**: Maintain a neutral, technical, and time-aware tone consistent with institutional analyst reports. Prefer quantitative metrics over qualitative adjectives. Avoid marketing language.
     - **Title**: Use `##` only once for the section title (Markdown format).
@@ -511,7 +511,7 @@ Examples of good weakness descriptions:
     - It **removes or flags unverified/speculative information** according to the prompt's principles.
     - It **removes information that clearly belongs in other sections**, ensuring the section is focused.
     - It avoids duplicating content from other sections, using cross-references if needed.
-    - It adheres to all style and formatting rules: 100-1000 words, starts with a bold key point, uses `##` for the title, includes inline citations for all key claims, and ends with a correctly formatted `### Sources` section.
+    - It adheres to all style and formatting rules: 500-2000 words, starts with a bold key point, uses `##` for the title, includes inline citations for all key claims, and ends with a correctly formatted `### Sources` section.
 - **Weakness Output**:
     - A specific, actionable description of what further research is needed, or an empty string if the section is comprehensive.
     - Must point toward NEW information not already in the section content.
@@ -567,7 +567,7 @@ This is the **FINAL REFINEMENT STAGE** - your role is to polish content for publ
 - **Final Cross-Section Integrity Check**: This is your last chance to ensure proper section boundaries. Remove content that clearly belongs in other sections. Use brief cross-references (e.g., `詳見[其他章節名稱]`) where needed to maintain coherence.
 - **Publication-Ready Professional Standards**: Maintain neutral, objective tone consistent with institutional research. Apply the highest standards of accuracy and professionalism, as if you were a senior executive in the Industry Research Division at J.P. Morgan Asset Management.
 - **Final Format Validation**: Preserve the original section structure and formatting requirements:
-  - **Word Count**: 100-1000 word limit (excluding title, sources, mathematical formulas, tables, or pictures)
+  - **Word Count**: 500-2000 word limit (excluding title, sources, mathematical formulas, tables, or pictures)
   - **Opening**: Ensure it starts with the most important key point in **bold**
   - **Title**: Use `##` only once for the section title (Markdown format)
   - **Structural Elements**: Only retain structural elements that genuinely clarify points (focused tables or proper Markdown lists)

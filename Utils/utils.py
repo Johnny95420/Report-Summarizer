@@ -56,6 +56,7 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     primary = ChatLiteLLM(
         model=model_name,
         temperature=temperature,
+        max_tokens=65536,
     )
 
     if tool:
@@ -69,7 +70,7 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
         if not (effective_content or getattr(msg, "tool_calls", None)):
             raise ValueError("Empty model output")
         finish_reason = (getattr(msg, "response_metadata", None) or {}).get("finish_reason")
-        if finish_reason == "length":
+        if finish_reason in ("length", "max_tokens"):
             raise ValueError("Output truncated by token limit")
         return msg
 
@@ -78,6 +79,7 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     backup = ChatLiteLLM(
         model=backup_model_name,
         temperature=backup_temperature,
+        max_tokens=65536,
     )
     if tool:
         backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
@@ -94,6 +96,7 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     primary = ChatLiteLLM(
         model=model_name,
         temperature=temperature,
+        max_tokens=65536,
     )
 
     if tool:
@@ -107,7 +110,7 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
         if not (effective_content or getattr(msg, "tool_calls", None)):
             raise ValueError("Empty model output")
         finish_reason = (getattr(msg, "response_metadata", None) or {}).get("finish_reason")
-        if finish_reason == "length":
+        if finish_reason in ("length", "max_tokens"):
             raise ValueError("Output truncated by token limit")
         return msg
 
@@ -116,6 +119,7 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     backup = ChatLiteLLM(
         model=backup_model_name,
         temperature=backup_temperature,
+        max_tokens=65536,
     )
     if tool:
         backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
@@ -267,7 +271,7 @@ def call_search_engine(
                     "query": query,
                     "include_raw_content": include_raw_content,
                     "max_results": 10,
-                    "timeout": 600,
+                    "timeout": 180,
                     "gl": gl,
                     "hl": hl,
                 }
@@ -276,7 +280,7 @@ def call_search_engine(
                 output = http_session.get(
                     f"http://{host}:{port}/search_and_crawl",
                     params=params,
-                    timeout=600,  # Give slightly more time than the service timeout
+                    timeout=210,  # Give slightly more time than the service timeout
                 )
                 output.raise_for_status()  # Raise exception for HTTP errors
 
