@@ -407,7 +407,7 @@ async def orchestration(state: SectionState, config: RunnableConfig):
             "question": current_question.question,
             "max_num_iterations": agentic_search_iterations,
             "num_queries": agentic_search_queries,
-            "url_memo": set(),
+            "url_memo": [],
             "source_registry": [],
         })
         answer = search_results.get("answer", "")
