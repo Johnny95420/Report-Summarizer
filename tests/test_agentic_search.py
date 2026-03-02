@@ -11,6 +11,7 @@ from subagent.agentic_search import (
     check_search_quality_async,
     check_searching_results,
     compress_raw_content,
+    crawl_filtered_results,
     filter_and_format_results,
     finalize_answer,
     generate_queries_from_question,
@@ -1090,8 +1091,6 @@ class TestChunkLargeArticles:
 class TestCrawlFilteredResults:
     def test_merges_raw_content_into_filtered_results(self):
         """crawl_filtered_results must call call_crawl_api and merge raw_content back."""
-        from subagent.agentic_search import crawl_filtered_results
-
         state = {
             "filtered_web_results": [
                 {"results": [
@@ -1111,8 +1110,6 @@ class TestCrawlFilteredResults:
 
     def test_collects_unique_urls_only(self):
         """Each URL is passed to call_crawl_api exactly once even if it appears in multiple query batches."""
-        from subagent.agentic_search import crawl_filtered_results
-
         state = {
             "filtered_web_results": [
                 {"results": [{"url": "http://dup.com", "title": "D", "content": "c"}]},
@@ -1127,8 +1124,6 @@ class TestCrawlFilteredResults:
 
     def test_empty_filtered_results(self):
         """No crash and call_crawl_api is called with empty list when no results."""
-        from subagent.agentic_search import crawl_filtered_results
-
         state = {"filtered_web_results": [{"results": []}]}
         with patch("subagent.agentic_search.call_crawl_api", return_value={}) as mock_crawl:
             result = crawl_filtered_results(state)
