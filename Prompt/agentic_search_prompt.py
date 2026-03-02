@@ -147,7 +147,10 @@ Your task is to evaluate how well the content of a "Document" satisfies the user
 </Task>
 
 <Notice>
-The "Raw Content" field in the document below may be truncated for efficiency. If you see "...[greater than 500 words truncated]" at the end, it means the full article is longer than what is shown. Do NOT penalize the score because the raw content appears short or incomplete — judge relevance based on the title, the brief content summary, and whatever raw content is available.
+The "Raw Content" field below may be absent or truncated. Adjust your evaluation accordingly:
+- If Raw Content is absent (shown as "(not yet fetched)"): evaluate solely on title and snippet — do NOT penalize for missing raw content.
+- If Raw Content is truncated (ends with "...[greater than 500 words truncated]"): the full article is longer; do NOT penalize for apparent brevity.
+In both cases, rely on the title and the brief content summary to judge relevance.
 </Notice>
 
 <Guideline>

@@ -221,6 +221,7 @@ def perform_web_search(state: AgenticSearchState):
     gl = state.get("gl", "tw")
     hl = state.get("hl", "zh-tw")
     time_filter = state.get("time_filter", "month")
+    queries = list(dict.fromkeys(queries))  # remove duplicate queries, preserve order
     web_results = call_search_engine(queries, True, time_filter=time_filter, gl=gl, hl=hl)
     dedup_results = []
     for results in web_results:
@@ -253,10 +254,14 @@ async def filter_and_format_results(state: AgenticSearchState):
         async with semaphore:
             try:
                 raw = result.get('raw_content') or ""
-                raw_preview = raw[:500] + "...[greater than 500 words truncated]" if len(raw) > 500 else raw
-                document = (
-                    f"Title:{result['title']}\n\nContent:{result['content']}\n\nRaw Content:{raw_preview}"
-                )
+                if raw:
+                    raw_section = (
+                        "\n\nRaw Content:" + raw[:500] +
+                        ("...[greater than 500 words truncated]" if len(raw) > 500 else "")
+                    )
+                else:
+                    raw_section = "\n\n(Raw content not yet fetched — evaluate based on title and snippet only.)"
+                document = f"Title:{result['title']}\n\nContent:{result['content']}{raw_section}"
                 score = await check_search_quality_async(query, document)
                 return query, result, score
             except Exception as e:
