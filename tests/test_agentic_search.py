@@ -1082,3 +1082,56 @@ class TestChunkLargeArticles:
         # similarity_search called with the follow-up query, not original
         mock_vs.similarity_search.assert_called_once_with("follow up query", k=5)
         mock_vs.delete_collection.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# crawl_filtered_results node
+# ---------------------------------------------------------------------------
+class TestCrawlFilteredResults:
+    def test_merges_raw_content_into_filtered_results(self):
+        """crawl_filtered_results must call call_crawl_api and merge raw_content back."""
+        from subagent.agentic_search import crawl_filtered_results
+
+        state = {
+            "filtered_web_results": [
+                {"results": [
+                    {"url": "http://a.com", "title": "A", "content": "snippet a"},
+                    {"url": "http://b.com", "title": "B", "content": "snippet b"},
+                ]}
+            ]
+        }
+        fake_crawl = {"http://a.com": "raw a content", "http://b.com": None}
+
+        with patch("subagent.agentic_search.call_crawl_api", return_value=fake_crawl):
+            result = crawl_filtered_results(state)
+
+        updated = result["filtered_web_results"][0]["results"]
+        assert updated[0]["raw_content"] == "raw a content"
+        assert updated[1]["raw_content"] is None
+
+    def test_collects_unique_urls_only(self):
+        """Each URL is passed to call_crawl_api exactly once even if it appears in multiple query batches."""
+        from subagent.agentic_search import crawl_filtered_results
+
+        state = {
+            "filtered_web_results": [
+                {"results": [{"url": "http://dup.com", "title": "D", "content": "c"}]},
+                {"results": [{"url": "http://dup.com", "title": "D", "content": "c"}]},
+            ]
+        }
+        with patch("subagent.agentic_search.call_crawl_api", return_value={"http://dup.com": "raw"}) as mock_crawl:
+            crawl_filtered_results(state)
+
+        called_urls = mock_crawl.call_args[0][0]
+        assert called_urls.count("http://dup.com") == 1
+
+    def test_empty_filtered_results(self):
+        """No crash and call_crawl_api is called with empty list when no results."""
+        from subagent.agentic_search import crawl_filtered_results
+
+        state = {"filtered_web_results": [{"results": []}]}
+        with patch("subagent.agentic_search.call_crawl_api", return_value={}) as mock_crawl:
+            result = crawl_filtered_results(state)
+
+        mock_crawl.assert_called_once_with([])
+        assert result["filtered_web_results"] == [{"results": []}]

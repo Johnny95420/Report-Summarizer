@@ -42,6 +42,7 @@ from Tools.tools import (
 )
 from Utils.embeddings import get_embedding_model
 from Utils.utils import (
+    call_crawl_api,
     call_llm,
     call_llm_async,
     call_search_engine,
@@ -496,6 +497,37 @@ def finalize_answer(state: AgenticSearchState) -> dict:
         state.get("answer", ""),
         state.get("source_registry", []),
     )}
+
+
+def crawl_filtered_results(state: AgenticSearchState) -> dict:
+    """Fetch raw_content for all quality-filtered URLs using POST /crawl.
+
+    Collects unique URLs from filtered_web_results, issues a single batch
+    POST /crawl call (server-side parallel), then merges raw_content back
+    into filtered_web_results so downstream nodes see complete results.
+    """
+    filtered_web_results = state["filtered_web_results"]
+
+    seen: set[str] = set()
+    all_urls: list[str] = []
+    for batch in filtered_web_results:
+        for result in batch.get("results", []):
+            url = result.get("url") or ""
+            if url and url not in seen:
+                all_urls.append(url)
+                seen.add(url)
+
+    raw_content_map = call_crawl_api(all_urls)
+
+    crawled = []
+    for batch in filtered_web_results:
+        new_batch: dict = {"results": []}
+        for result in batch.get("results", []):
+            url = result.get("url") or ""
+            new_batch["results"].append({**result, "raw_content": raw_content_map.get(url)})
+        crawled.append(new_batch)
+
+    return {"filtered_web_results": crawled}
 
 
 _CHUNK_THRESHOLD = 5000  # chars; articles shorter than this pass through chunk_large_articles unchanged
