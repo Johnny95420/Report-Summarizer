@@ -257,7 +257,7 @@ async def filter_and_format_results(state: AgenticSearchState):
                 if raw:
                     raw_section = (
                         "\n\nRaw Content:" + raw[:500] +
-                        ("...[greater than 500 words truncated]" if len(raw) > 500 else "")
+                        ("...[greater than 500 characters truncated]" if len(raw) > 500 else "")
                     )
                 else:
                     raw_section = "\n\n(Raw content not yet fetched — evaluate based on title and snippet only.)"

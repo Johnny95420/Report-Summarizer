@@ -429,6 +429,48 @@ class TestScoreThresholdAndExceptionHandling:
 
 
 # ---------------------------------------------------------------------------
+# Absent raw_content — LLM prompt must contain the correct marker
+# ---------------------------------------------------------------------------
+class TestFilterAbsentRawContent:
+    def test_document_contains_not_yet_fetched_when_raw_absent(self):
+        """When raw_content is absent, the LLM receives a '(Raw content not yet fetched)' marker."""
+        state = _filter_state([[{"url": "http://x.com", "title": "Title A", "content": "Snippet A"}]])
+        mock_response = MagicMock()
+        mock_response.tool_calls = [{"args": {"score": 4}}]
+
+        captured = {}
+
+        async def fake_llm(*args, prompt, **kwargs):
+            captured["prompt"] = prompt
+            return mock_response
+
+        with patch("subagent.agentic_search.call_llm_async", side_effect=fake_llm):
+            result = _run(filter_and_format_results(state))
+        assert len(result["filtered_web_results"][0]["results"]) == 1
+        # The document passed to the LLM must contain the "not yet fetched" marker
+        full_prompt = " ".join(msg.content for msg in captured["prompt"])
+        assert "not yet fetched" in full_prompt
+
+    def test_document_contains_raw_content_preview_when_present(self):
+        """When raw_content is present, the LLM receives the 500-char preview."""
+        state = _filter_state([[{"url": "http://y.com", "title": "Title B", "content": "Snippet B", "raw_content": "x" * 600}]])
+        mock_response = MagicMock()
+        mock_response.tool_calls = [{"args": {"score": 4}}]
+
+        captured = {}
+
+        async def fake_llm(*args, prompt, **kwargs):
+            captured["prompt"] = prompt
+            return mock_response
+
+        with patch("subagent.agentic_search.call_llm_async", side_effect=fake_llm):
+            result = _run(filter_and_format_results(state))
+        full_prompt = " ".join(msg.content for msg in captured["prompt"])
+        assert "Raw Content:" in full_prompt
+        assert "500 characters truncated" in full_prompt
+
+
+# ---------------------------------------------------------------------------
 # Helper shared by compress_raw_content tests
 # ---------------------------------------------------------------------------
 def _compress_state(results_per_query: list[list[dict]]) -> dict:

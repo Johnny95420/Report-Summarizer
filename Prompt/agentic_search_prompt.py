@@ -149,7 +149,7 @@ Your task is to evaluate how well the content of a "Document" satisfies the user
 <Notice>
 The "Raw Content" field below may be absent or truncated. Adjust your evaluation accordingly:
 - If Raw Content is absent (shown as "(not yet fetched)"): evaluate solely on title and snippet — do NOT penalize for missing raw content.
-- If Raw Content is truncated (ends with "...[greater than 500 words truncated]"): the full article is longer; do NOT penalize for apparent brevity.
+- If Raw Content is truncated (ends with "...[greater than 500 characters truncated]"): the full article is longer; do NOT penalize for apparent brevity.
 In both cases, rely on the title and the brief content summary to judge relevance.
 </Notice>
 
