@@ -152,14 +152,15 @@ class TestSearchTimeout:
         assert 60 < 180  # crawl
 
     def test_call_search_api_uses_get_slash_search(self):
-        """call_search_api must call /search, not /search_and_crawl."""
+        """_search_one (called by call_search_api) must use GET /search, not /search_and_crawl."""
         source = _utils_source()
         tree = ast.parse(source)
-        func = find_function(tree, "call_search_api")
-        assert func is not None
+        func = find_function(tree, "_search_one")
+        assert func is not None, "_search_one helper function not found"
         func_src = ast.unparse(func)
         assert "/search" in func_src
         assert "search_and_crawl" not in func_src
+        assert ".get(" in func_src  # must use GET, not POST
 
     def test_call_crawl_api_uses_post_slash_crawl(self):
         """call_crawl_api must call /crawl via POST."""
