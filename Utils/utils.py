@@ -40,6 +40,14 @@ def create_http_session():
 
 http_session = create_http_session()
 
+# Timeout constants for the decoupled /search and /crawl endpoints
+_SEARCH_MAX_RESULTS = 10
+_SEARCH_SERVICE_TIMEOUT = 30   # passed as ?timeout= to GET /search
+_SEARCH_HTTP_TIMEOUT = 45      # requests client timeout for GET /search
+
+_CRAWL_SERVICE_TIMEOUT = 60    # passed as "timeout" in POST /crawl body (per-URL)
+_CRAWL_HTTP_TIMEOUT = 180      # requests client timeout for POST /crawl (server crawls in parallel)
+
 logger = logging.getLogger("Utils")
 logger.setLevel(logging.ERROR)
 
@@ -248,92 +256,171 @@ def tavily_search(search_queries, include_raw_content: bool):
     return search_docs
 
 
+def _search_one(
+    base_url: str,
+    query: str,
+    time_filter: str,
+    gl: str,
+    hl: str,
+    max_results: int = _SEARCH_MAX_RESULTS,
+) -> dict:
+    """GET /search for a single query. Returns {"results": [...]} or {"results": []} on failure."""
+    max_retries = 3
+    params = {
+        "query": query,
+        "max_results": max_results,
+        "timeout": _SEARCH_SERVICE_TIMEOUT,
+        "gl": gl,
+        "hl": hl,
+    }
+    if time_filter != "all":
+        params["time_filter"] = time_filter
+
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"GET /search query='{query}' attempt {attempt + 1}")
+            response = http_session.get(
+                f"{base_url}/search", params=params, timeout=_SEARCH_HTTP_TIMEOUT
+            )
+            response.raise_for_status()
+            try:
+                return response.json()
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse /search JSON for '{query}': {e}")
+                if attempt == max_retries - 1:
+                    return {"results": []}
+                continue
+        except Timeout:
+            logger.warning(f"/search timeout for '{query}' attempt {attempt + 1}")
+            if attempt == max_retries - 1:
+                logger.error(f"Max retries exceeded for /search '{query}' (timeout)")
+                return {"results": []}
+        except ConnectionError:
+            logger.warning(f"/search connection error for '{query}' attempt {attempt + 1}")
+            if attempt == max_retries - 1:
+                logger.error(f"Max retries exceeded for /search '{query}' (connection error)")
+                return {"results": []}
+        except RequestException as e:
+            logger.error(f"/search request error for '{query}': {e}")
+            if attempt == max_retries - 1:
+                return {"results": []}
+        time.sleep(2 ** attempt)
+
+    return {"results": []}
+
+
+def call_search_api(
+    search_queries: list[str],
+    time_filter: str = "month",
+    gl: str = "tw",
+    hl: str = "zh-tw",
+    max_results: int = _SEARCH_MAX_RESULTS,
+) -> list[dict]:
+    """Call GET /search for each query.
+
+    Returns list[{"results": [{"title", "url", "content"}]}].
+    Results do NOT contain raw_content — call call_crawl_api separately if needed.
+    """
+    host = os.environ.get("SEARCH_HOST")
+    port = os.environ.get("SEARCH_PORT")
+    if not host or not port:
+        logger.error("SEARCH_HOST and SEARCH_PORT environment variables are required")
+        return [{"results": []} for _ in search_queries]
+
+    base_url = f"http://{host}:{port}"
+    return [
+        _search_one(base_url, query, time_filter=time_filter, gl=gl, hl=hl, max_results=max_results)
+        for query in search_queries
+    ]
+
+
+def call_crawl_api(urls: list[str], crawl_timeout: int = _CRAWL_SERVICE_TIMEOUT) -> dict[str, str | None]:
+    """POST /crawl for a batch of URLs (crawled in parallel on the server).
+
+    Returns {url: raw_content} mapping. raw_content is None on crawl failure or bot detection.
+    """
+    if not urls:
+        return {}
+
+    host = os.environ.get("SEARCH_HOST")
+    port = os.environ.get("SEARCH_PORT")
+    if not host or not port:
+        logger.error("SEARCH_HOST and SEARCH_PORT environment variables are required")
+        return {u: None for u in urls}
+
+    base_url = f"http://{host}:{port}"
+    fallback: dict[str, str | None] = {u: None for u in urls}
+    max_retries = 3
+
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"POST /crawl {len(urls)} URLs attempt {attempt + 1}")
+            response = http_session.post(
+                f"{base_url}/crawl",
+                json={"urls": urls, "timeout": crawl_timeout},
+                timeout=_CRAWL_HTTP_TIMEOUT,
+            )
+            response.raise_for_status()
+            try:
+                data = response.json()
+                return {r["url"]: r.get("raw_content") for r in data.get("results", [])}
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse /crawl JSON: {e}")
+                if attempt == max_retries - 1:
+                    return fallback
+                continue
+        except Timeout:
+            logger.warning(f"/crawl timeout attempt {attempt + 1}")
+            if attempt == max_retries - 1:
+                logger.error("Max retries exceeded for /crawl (timeout)")
+                return fallback
+        except ConnectionError:
+            logger.warning(f"/crawl connection error attempt {attempt + 1}")
+            if attempt == max_retries - 1:
+                logger.error("Max retries exceeded for /crawl (connection error)")
+                return fallback
+        except RequestException as e:
+            logger.error(f"/crawl request error: {e}")
+            if attempt == max_retries - 1:
+                return fallback
+        time.sleep(2 ** attempt)
+
+    return fallback
+
+
 def call_search_engine(
     search_queries,
     include_raw_content: bool,
     time_filter: str = "month",
     gl: str = "tw",
     hl: str = "zh-tw",
-):
-    host = os.environ.get("SEARCH_HOST", None)
-    port = os.environ.get("SEARCH_PORT", None)
-    search_docs = []
+) -> list[dict]:
+    """Deprecated: use call_search_api + call_crawl_api separately.
 
-    # Check if host and port are configured
-    if not host or not port:
-        logger.error("SEARCH_HOST and SEARCH_PORT environment variables are required")
+    Kept as a backward-compat wrapper for callers that have not yet been migrated.
+    """
+    search_docs = call_search_api(search_queries, time_filter=time_filter, gl=gl, hl=hl)
+
+    if not include_raw_content:
         return search_docs
 
-    for query in search_queries:
-        max_retries = 3
-        retry_delay = 1
+    # Collect unique URLs across all query results
+    seen: set[str] = set()
+    all_urls: list[str] = []
+    for batch in search_docs:
+        for result in batch.get("results", []):
+            url = result.get("url") or ""
+            if url and url not in seen:
+                all_urls.append(url)
+                seen.add(url)
 
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"Searching query: {query}, attempt {attempt + 1}")
+    raw_content_map = call_crawl_api(all_urls)
 
-                params = {
-                    "query": query,
-                    "include_raw_content": include_raw_content,
-                    "max_results": 10,
-                    "timeout": 180,
-                    "gl": gl,
-                    "hl": hl,
-                }
-                if time_filter != "all":
-                    params["time_filter"] = time_filter
-                output = http_session.get(
-                    f"http://{host}:{port}/search_and_crawl",
-                    params=params,
-                    timeout=210,  # Give slightly more time than the service timeout
-                )
-                output.raise_for_status()  # Raise exception for HTTP errors
+    for batch in search_docs:
+        for result in batch.get("results", []):
+            result["title"] = result.get("title", "").replace("/", "_")
+            result["raw_content"] = raw_content_map.get(result.get("url") or "")
 
-                try:
-                    output_data = output.json()
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse JSON response for query '{query}': {e}")
-                    if attempt == max_retries - 1:
-                        # Add empty result on final attempt
-                        search_docs.append({"results": []})
-                    continue
-
-                break  # Success, exit retry loop
-
-            except Timeout as e:
-                logger.warning(f"Timeout for query '{query}' on attempt {attempt + 1}: {e}")
-                if attempt == max_retries - 1:
-                    logger.error(f"Max retries exceeded for query '{query}' due to timeout")
-                    search_docs.append({"results": []})
-                    continue
-                time.sleep(retry_delay * (2**attempt))  # Exponential backoff
-
-            except ConnectionError as e:
-                logger.warning(f"Connection error for query '{query}' on attempt {attempt + 1}: {e}")
-                if attempt == max_retries - 1:
-                    logger.error(f"Max retries exceeded for query '{query}' due to connection error")
-                    search_docs.append({"results": []})
-                    continue
-                time.sleep(retry_delay * (2**attempt))
-
-            except RequestException as e:
-                logger.error(f"Request failed for query '{query}': {e}")
-                if attempt == max_retries - 1:
-                    search_docs.append({"results": []})
-                    continue
-                time.sleep(retry_delay * (2**attempt))
-
-        else:
-            # If we reach here, the loop completed without breaking (all retries failed)
-            continue
-
-        # Process successful response
-        if include_raw_content:
-            for result in output_data.get("results", []):
-                result["title"] = result["title"].replace("/", "_")
-                if result.get("raw_content", "") is None:
-                    continue
-        search_docs.append(output_data)
     return search_docs
 
 

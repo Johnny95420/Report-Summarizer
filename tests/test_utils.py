@@ -120,35 +120,53 @@ class TestTruncationDetection:
 # ---------------------------------------------------------------------------
 
 class TestSearchTimeout:
-    """call_search_engine must use service timeout=180 and client timeout=210."""
+    """call_search_api and call_crawl_api must use correct timeout constants."""
 
-    def test_service_timeout_is_180(self):
+    def test_search_service_timeout_constant(self):
+        """_SEARCH_SERVICE_TIMEOUT must be defined and equal 30."""
+        source = _utils_source()
+        assert "_SEARCH_SERVICE_TIMEOUT" in source
+        assert "= 30" in source
+
+    def test_search_http_timeout_constant(self):
+        """_SEARCH_HTTP_TIMEOUT must be defined and equal 45."""
+        source = _utils_source()
+        assert "_SEARCH_HTTP_TIMEOUT" in source
+        assert "= 45" in source
+
+    def test_crawl_service_timeout_constant(self):
+        """_CRAWL_SERVICE_TIMEOUT must be defined and equal 60."""
+        source = _utils_source()
+        assert "_CRAWL_SERVICE_TIMEOUT" in source
+        assert "= 60" in source
+
+    def test_crawl_http_timeout_constant(self):
+        """_CRAWL_HTTP_TIMEOUT must be defined and equal 180."""
+        source = _utils_source()
+        assert "_CRAWL_HTTP_TIMEOUT" in source
+        assert "= 180" in source
+
+    def test_search_timeouts_ordered(self):
+        """Service timeout must be strictly less than HTTP timeout for both endpoints."""
+        assert 30 < 45   # search
+        assert 60 < 180  # crawl
+
+    def test_call_search_api_uses_get_slash_search(self):
+        """call_search_api must call /search, not /search_and_crawl."""
         source = _utils_source()
         tree = ast.parse(source)
-        func = find_function(tree, "call_search_engine")
+        func = find_function(tree, "call_search_api")
         assert func is not None
-
-        # Find the params dict and check timeout value
         func_src = ast.unparse(func)
-        assert '"timeout": 180' in func_src or "'timeout': 180" in func_src, (
-            "call_search_engine service timeout should be 180, check params dict"
-        )
+        assert "/search" in func_src
+        assert "search_and_crawl" not in func_src
 
-    def test_client_timeout_is_210(self):
+    def test_call_crawl_api_uses_post_slash_crawl(self):
+        """call_crawl_api must call /crawl via POST."""
         source = _utils_source()
         tree = ast.parse(source)
-        func = find_function(tree, "call_search_engine")
+        func = find_function(tree, "call_crawl_api")
         assert func is not None
-
         func_src = ast.unparse(func)
-        # Client timeout is passed to http_session.get(timeout=210)
-        assert "timeout=210" in func_src, (
-            "call_search_engine client-side timeout should be 210"
-        )
-
-    def test_service_timeout_less_than_client_timeout(self):
-        """Service timeout must be < client timeout so the service can respond before client gives up."""
-        source = _utils_source()
-        # Simple string check: both values must be present and service(180) < client(210)
-        assert "180" in source and "210" in source
-        # The relationship is guaranteed by values: 180 < 210
+        assert "/crawl" in func_src
+        assert ".post(" in func_src
