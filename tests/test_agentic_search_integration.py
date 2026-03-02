@@ -36,7 +36,6 @@ _FAKE_SEARCH_RESPONSE = [
                 "url": _DUP_URL,
                 "title": "Dup Title",
                 "content": "Some content.",
-                "raw_content": "Some raw content.",
             }
         ]
     }
@@ -265,7 +264,6 @@ class TestSourceRegistryIntegration:
                     "url": "https://example.com/article",
                     "title": "Example Article",
                     "content": "CPO reduces power",
-                    "raw_content": "CPO reduces power by 30%.",
                 }
             ]
         }
@@ -331,10 +329,10 @@ class TestSourceRegistryIntegration:
         from subagent.agentic_search import agentic_search_graph
 
         iter1_result = [{"results": [
-            {"url": "https://first.com", "title": "First", "content": "c", "raw_content": "r"}
+            {"url": "https://first.com", "title": "First", "content": "c"}
         ]}]
         iter2_result = [{"results": [
-            {"url": "https://second.com", "title": "Second", "content": "c", "raw_content": "r"}
+            {"url": "https://second.com", "title": "Second", "content": "c"}
         ]}]
 
         call_count = {"n": 0}
@@ -401,7 +399,6 @@ class TestFinalizeAnswerNode:
                     "url": _ARTICLE_URL,
                     "title": _ARTICLE_TITLE,
                     "content": "Test content about the topic.",
-                    "raw_content": "Test raw content about the topic.",
                 }
             ]
         }
