@@ -144,9 +144,10 @@ class TestAgenticSearchGraphUrlMemoPropagation:
     The graph is:
         START → get_searching_budget → generate_queries_from_question
               → perform_web_search → filter_and_format_results
+              → crawl_filtered_results → chunk_large_articles
               → compress_raw_content → aggregate_final_results
               → synthesize_answer → check_searching_results
-              → (loops to perform_web_search if grade='fail', else END)
+              → (loops to perform_web_search if grade='fail', else finalize_answer → END)
 
     With ``max_num_iterations=2`` the graph executes two full cycles.  After
     iteration 1, ``url_memo`` contains ``_DUP_URL``.  LangGraph must feed that
@@ -212,6 +213,7 @@ class TestAgenticSearchGraphUrlMemoPropagation:
                     "call_search_api",
                     return_value=_FAKE_SEARCH_RESPONSE,
                 ) as mock_search,
+                patch.object(ag, "call_crawl_api", return_value={_DUP_URL: "Some raw content."}),
                 patch.object(ag, "call_llm_async", side_effect=_fake_call_llm_async),
                 patch.object(ag, "call_llm", side_effect=call_llm_fn),
             ):
@@ -309,6 +311,7 @@ class TestSourceRegistryIntegration:
 
         with (
             patch.object(ag, "call_search_api", return_value=self._FAKE_RESULT),
+            patch.object(ag, "call_crawl_api", return_value={"https://example.com/article": "CPO reduces power by 30%."}),
             patch.object(ag, "call_llm_async", side_effect=self._quality_ok),
             patch.object(ag, "call_llm", side_effect=self._make_call_llm([queries_resp, synth_resp, grade_resp])),
         ):
@@ -356,6 +359,7 @@ class TestSourceRegistryIntegration:
 
         with (
             patch.object(ag, "call_search_api", side_effect=fake_search),
+            patch.object(ag, "call_crawl_api", return_value={"https://first.com": "r", "https://second.com": "r"}),
             patch.object(ag, "call_llm_async", side_effect=self._quality_ok),
             patch.object(ag, "call_llm", side_effect=self._make_call_llm([queries_resp, synth1, grade_fail, synth2])),
         ):
@@ -455,6 +459,7 @@ class TestFinalizeAnswerNode:
 
         with (
             patch.object(ag, "call_search_api", return_value=self._FAKE_RESULT),
+            patch.object(ag, "call_crawl_api", return_value={self._ARTICLE_URL: "Test raw content about the topic."}),
             patch.object(ag, "call_llm_async", side_effect=self._quality_ok),
             patch.object(
                 ag,
