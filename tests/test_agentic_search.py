@@ -261,9 +261,13 @@ class TestWebResultTypedDicts:
         from State.agentic_search_state import WebResult, WebResultBatch  # noqa: F401
 
     def test_web_result_required_keys(self):
-        """WebResult must declare the four required keys used throughout agentic_search nodes."""
+        """WebResult must declare title, content, and url as required keys.
+
+        raw_content is intentionally NotRequired because it is absent between the
+        search step (perform_web_search) and the crawl step (crawl_filtered_results).
+        """
         from State.agentic_search_state import WebResult
-        required = {"title", "content", "raw_content", "url"}
+        required = {"title", "content", "url"}
         # __required_keys__ is set by TypedDict for non-NotRequired fields
         assert required <= WebResult.__required_keys__, (
             f"WebResult missing required keys: {required - WebResult.__required_keys__}"
@@ -273,6 +277,11 @@ class TestWebResultTypedDicts:
         """score must be NotRequired so results without a score are valid."""
         from State.agentic_search_state import WebResult
         assert "score" in WebResult.__optional_keys__, "score must be NotRequired in WebResult"
+
+    def test_web_result_raw_content_is_optional(self):
+        """raw_content must be NotRequired — absent between search and crawl steps."""
+        from State.agentic_search_state import WebResult
+        assert "raw_content" in WebResult.__optional_keys__, "raw_content must be NotRequired in WebResult"
 
     def test_web_result_batch_has_results_key(self):
         """WebResultBatch must declare a 'results' key."""

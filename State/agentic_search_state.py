@@ -5,9 +5,9 @@ from typing import Annotated, NotRequired, TypedDict
 class WebResult(TypedDict):
     title: str
     content: str
-    raw_content: str
     url: str
     score: NotRequired[int]
+    raw_content: NotRequired[str]   # absent between search and crawl steps
 
 
 class WebResultBatch(TypedDict):
