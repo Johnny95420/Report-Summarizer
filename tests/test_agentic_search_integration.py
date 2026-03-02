@@ -302,7 +302,7 @@ class TestSourceRegistryIntegration:
         async def _run():
             return await agentic_search_graph.ainvoke({
                 "question": "What is CPO?",
-                "url_memo": set(),
+                "url_memo": [],
                 "source_registry": [],
                 "max_num_iterations": 1,
             })
@@ -349,7 +349,7 @@ class TestSourceRegistryIntegration:
         async def _run():
             return await agentic_search_graph.ainvoke({
                 "question": "Test question",
-                "url_memo": set(),
+                "url_memo": [],
                 "source_registry": [],
                 "max_num_iterations": 2,
             })
@@ -448,7 +448,7 @@ class TestFinalizeAnswerNode:
         async def _run():
             return await agentic_search_graph.ainvoke({
                 "question": "What is the topic?",
-                "url_memo": set(),
+                "url_memo": [],
                 "source_registry": [],
                 "max_num_iterations": 1,
             })
