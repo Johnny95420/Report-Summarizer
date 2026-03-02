@@ -45,7 +45,7 @@ from Utils.utils import (
     call_crawl_api,
     call_llm,
     call_llm_async,
-    call_search_engine,
+    call_search_api,
     web_search_deduplicate_and_format_sources,
 )
 
@@ -223,7 +223,7 @@ def perform_web_search(state: AgenticSearchState):
     hl = state.get("hl", "zh-tw")
     time_filter = state.get("time_filter", "month")
     queries = list(dict.fromkeys(queries))  # remove duplicate queries, preserve order
-    web_results = call_search_engine(queries, True, time_filter=time_filter, gl=gl, hl=hl)
+    web_results = call_search_api(queries, time_filter=time_filter, gl=gl, hl=hl)
     dedup_results = []
     for results in web_results:
         dedup_results.append({"results": []})
