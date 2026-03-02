@@ -42,9 +42,11 @@ from Tools.tools import (
 )
 from Utils.embeddings import get_embedding_model
 from Utils.utils import (
+    _collect_unique_urls,
+    call_crawl_api,
     call_llm,
     call_llm_async,
-    call_search_engine,
+    call_search_api,
     web_search_deduplicate_and_format_sources,
 )
 
@@ -221,7 +223,8 @@ def perform_web_search(state: AgenticSearchState):
     gl = state.get("gl", "tw")
     hl = state.get("hl", "zh-tw")
     time_filter = state.get("time_filter", "month")
-    web_results = call_search_engine(queries, True, time_filter=time_filter, gl=gl, hl=hl)
+    queries = list(dict.fromkeys(queries))  # remove duplicate queries, preserve order
+    web_results = call_search_api(queries, time_filter=time_filter, gl=gl, hl=hl)
     dedup_results = []
     for results in web_results:
         dedup_results.append({"results": []})
@@ -253,10 +256,14 @@ async def filter_and_format_results(state: AgenticSearchState):
         async with semaphore:
             try:
                 raw = result.get('raw_content') or ""
-                raw_preview = raw[:500] + "...[greater than 500 words truncated]" if len(raw) > 500 else raw
-                document = (
-                    f"Title:{result['title']}\n\nContent:{result['content']}\n\nRaw Content:{raw_preview}"
-                )
+                if raw:
+                    raw_section = (
+                        "\n\nRaw Content:" + raw[:500] +
+                        ("...[greater than 500 characters truncated]" if len(raw) > 500 else "")
+                    )
+                else:
+                    raw_section = "\n\n(Raw content not yet fetched — evaluate based on title and snippet only.)"
+                document = f"Title:{result['title']}\n\nContent:{result['content']}{raw_section}"
                 score = await check_search_quality_async(query, document)
                 return query, result, score
             except Exception as e:
@@ -493,6 +500,30 @@ def finalize_answer(state: AgenticSearchState) -> dict:
     )}
 
 
+def crawl_filtered_results(state: AgenticSearchState) -> dict:
+    """Fetch raw_content for all quality-filtered URLs using POST /crawl.
+
+    Collects unique URLs from filtered_web_results, issues a single batch
+    POST /crawl call (server-side parallel), then merges raw_content back
+    into filtered_web_results so downstream nodes see complete results.
+    """
+    filtered_web_results = state["filtered_web_results"]
+    urls = _collect_unique_urls(filtered_web_results)
+    raw_content_map = call_crawl_api(urls)
+    fetched = sum(1 for v in raw_content_map.values() if v)
+    logger.info("crawl_filtered_results: %d URLs crawled, %d returned content", len(urls), fetched)
+
+    crawled = []
+    for batch in filtered_web_results:
+        new_batch: dict = {"results": []}
+        for result in batch.get("results", []):
+            url = result.get("url") or ""
+            new_batch["results"].append({**result, "raw_content": raw_content_map.get(url)})
+        crawled.append(new_batch)
+
+    return {"filtered_web_results": crawled}
+
+
 _CHUNK_THRESHOLD = 5000  # chars; articles shorter than this pass through chunk_large_articles unchanged
 _COMPRESS_CHAR_THRESHOLD = 5000  # chars; content shorter than this passes through compress_raw_content unchanged
 
@@ -562,6 +593,7 @@ class AgenticSearchGraphBuilder:
             builder.add_node("generate_queries_from_question", generate_queries_from_question)
             builder.add_node("perform_web_search", perform_web_search)
             builder.add_node("filter_and_format_results", filter_and_format_results)
+            builder.add_node("crawl_filtered_results", crawl_filtered_results)
             builder.add_node("chunk_large_articles", chunk_large_articles)
             builder.add_node("compress_raw_content", compress_raw_content)
             builder.add_node("aggregate_final_results", aggregate_final_results)
@@ -573,7 +605,8 @@ class AgenticSearchGraphBuilder:
             builder.add_edge("get_searching_budget", "generate_queries_from_question")
             builder.add_edge("generate_queries_from_question", "perform_web_search")
             builder.add_edge("perform_web_search", "filter_and_format_results")
-            builder.add_edge("filter_and_format_results", "chunk_large_articles")
+            builder.add_edge("filter_and_format_results", "crawl_filtered_results")
+            builder.add_edge("crawl_filtered_results", "chunk_large_articles")
             builder.add_edge("chunk_large_articles", "compress_raw_content")
             builder.add_edge("compress_raw_content", "aggregate_final_results")
             builder.add_edge("aggregate_final_results", "synthesize_answer")
@@ -589,12 +622,20 @@ agentic_search_graph = agentic_search_graph_builder.get_graph()
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    for _log_name in ("AgenticSearch", "Utils"):
+        _log = logging.getLogger(_log_name)
+        _log.setLevel(logging.INFO)
+        for _h in _log.handlers:
+            _h.setLevel(logging.INFO)
 
     _DEFAULT_QUESTION = (
-        "Main Question: What are Tesla's key revenue drivers in 2024?\n"
-        "- Sub-question 1: What is the automotive vs. energy revenue split?\n"
-        "- Sub-question 2: How did FSD subscription revenue perform?\n"
-        "- Sub-question 3: What were the gross margin trends by segment?"
+        "Main Question: 詳細說明 InP 低軌道衛星 光通訊之間的關係"
+        "- Sub-question 1: 說明 InP 產能主要用於那裡？"
+        "- Sub-question 2: InP 與低軌道衛星 光通訊之間關係？"
+        "- Sub-question 3: 這個題材台股會有哪些股票受惠？"
+        "- Sub-question 4: 我是否可以認為 InP 題材在台股中，等同於上了兩道保險，低軌道衛星跟光通訊通吃 請給出具體分析？"
     )
     question = (sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else _DEFAULT_QUESTION)
 
@@ -604,6 +645,7 @@ if __name__ == "__main__":
     import time
 
     num_iterations = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    num_queries = int(sys.argv[3]) if len(sys.argv) > 3 else 3
 
     async def _run():
         timings = []
@@ -612,7 +654,7 @@ if __name__ == "__main__":
         t_start = t_prev
 
         async for event in agentic_search_graph.astream(
-            {"question": question, "url_memo": [], "source_registry": [], "max_num_iterations": num_iterations},
+            {"question": question, "url_memo": [], "source_registry": [], "max_num_iterations": num_iterations, "num_queries": num_queries},
             stream_mode="updates",
         ):
             t_now = time.perf_counter()

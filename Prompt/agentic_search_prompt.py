@@ -99,16 +99,19 @@ that together comprehensively cover all aspects of the question.
 </Task>
 
 <Query Format>
-- Use KEYWORDS, not sentences (target 3-8 words; up to 12 for complex multi-concept queries)
+- Use KEYWORDS, not sentences (target 3-6 words per query)
+- Each query must have ONE clear information need — do not combine multiple unrelated concepts in a single query
 - Format: [Entity] [Concept] [Time?]
-- Examples: "台積電 N3 良率 2023 Q4" | "US CPI December 2023" | "Nvidia H100 supply chain hyperscaler capex 2024"
+- Examples: "台積電 N3 良率 2023 Q4" | "US CPI December 2023" | "Nvidia H100 datacenter revenue 2024"
 </Query Format>
 
 <Strategy>
 1. Generate one query per distinct aspect of the research question (main question + each sub-question).
 2. Vary the angle: broad overview, specific metrics, competitive comparison, risk factors, regulatory context.
 3. Be specific: include entity names, time periods, and key metrics.
-4. Avoid redundant or near-duplicate queries.
+4. Avoid redundant or near-duplicate queries — if two sub-questions overlap, merge them into one query and use the freed slot for a different angle.
+5. For global/technical topics (semiconductors, AI, satellites, international markets), include at least one English-language query to capture international research and analyst reports.
+6. Use only terms that appear in real articles — avoid abstract analytical framing or conceptual labels. Replace with concrete entity names, product names, or market terminology.
 </Strategy>
 
 <Language Rules>
@@ -147,7 +150,10 @@ Your task is to evaluate how well the content of a "Document" satisfies the user
 </Task>
 
 <Notice>
-The "Raw Content" field in the document below may be truncated for efficiency. If you see "...[greater than 500 words truncated]" at the end, it means the full article is longer than what is shown. Do NOT penalize the score because the raw content appears short or incomplete — judge relevance based on the title, the brief content summary, and whatever raw content is available.
+The "Raw Content" field below may be absent or truncated. Adjust your evaluation accordingly:
+- If Raw Content is absent (shown as "(not yet fetched)"): evaluate solely on title and snippet — do NOT penalize for missing raw content.
+- If Raw Content is truncated (ends with "...[greater than 500 characters truncated]"): the full article is longer; do NOT penalize for apparent brevity.
+In both cases, rely on the title and the brief content summary to judge relevance.
 </Notice>
 
 <Guideline>

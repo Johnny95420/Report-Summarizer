@@ -72,7 +72,7 @@ from Tools.tools import (
 from Utils.utils import (
     call_llm,
     call_llm_async,
-    call_search_engine,
+    call_search_api,
     format_human_feedback,
     format_search_results_with_metadata,
     format_sections,
@@ -247,7 +247,7 @@ def _perform_planner_search(
         source_str = format_search_results_with_metadata(results)
 
     if use_web:
-        web_results = call_search_engine(queries, False, time_filter=time_filter, gl=gl, hl=hl)
+        web_results = call_search_api(queries, time_filter=time_filter, gl=gl, hl=hl)
         source_str2 = web_search_deduplicate_and_format_sources(web_results, False)
         source_str = source_str + "===\n\n" + source_str2
 
