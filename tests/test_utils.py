@@ -172,3 +172,18 @@ class TestSearchTimeout:
         func_src = ast.unparse(func)
         assert "/crawl" in func_src
         assert ".post(" in func_src
+
+    def test_max_retries_constant(self):
+        """_MAX_RETRIES must be defined as a module constant."""
+        from Utils.utils import _MAX_RETRIES
+        assert _MAX_RETRIES == 3
+
+    def test_collect_unique_urls_deduplicates(self):
+        """_collect_unique_urls returns ordered unique URLs from batch list."""
+        from Utils.utils import _collect_unique_urls
+        batches = [
+            {"results": [{"url": "http://a.com"}, {"url": "http://b.com"}]},
+            {"results": [{"url": "http://a.com"}, {"url": "http://c.com"}]},
+        ]
+        result = _collect_unique_urls(batches)
+        assert result == ["http://a.com", "http://b.com", "http://c.com"]

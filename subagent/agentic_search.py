@@ -42,6 +42,7 @@ from Tools.tools import (
 )
 from Utils.embeddings import get_embedding_model
 from Utils.utils import (
+    _collect_unique_urls,
     call_crawl_api,
     call_llm,
     call_llm_async,
@@ -507,17 +508,7 @@ def crawl_filtered_results(state: AgenticSearchState) -> dict:
     into filtered_web_results so downstream nodes see complete results.
     """
     filtered_web_results = state["filtered_web_results"]
-
-    seen: set[str] = set()
-    all_urls: list[str] = []
-    for batch in filtered_web_results:
-        for result in batch.get("results", []):
-            url = result.get("url") or ""
-            if url and url not in seen:
-                all_urls.append(url)
-                seen.add(url)
-
-    raw_content_map = call_crawl_api(all_urls)
+    raw_content_map = call_crawl_api(_collect_unique_urls(filtered_web_results))
 
     crawled = []
     for batch in filtered_web_results:
@@ -630,10 +621,10 @@ agentic_search_graph = agentic_search_graph_builder.get_graph()
 if __name__ == "__main__":
 
     _DEFAULT_QUESTION = (
-        "Main Question: What are Tesla's key revenue drivers in 2024?\n"
-        "- Sub-question 1: What is the automotive vs. energy revenue split?\n"
-        "- Sub-question 2: How did FSD subscription revenue perform?\n"
-        "- Sub-question 3: What were the gross margin trends by segment?"
+        "Main Question: 聯亞在 2026 年的主要營收驅動因素是什麼？"
+        "- Sub-question 1: 各產品線的營收占比為何（例如光通訊元件、雷射二極體、其他產品）？"
+        "- Sub-question 2: 主要應用市場（例如資料中心、電信、消費性電子）的營收表現如何？"
+        "- Sub-question 3: 各產品線的毛利率趨勢為何？"
     )
     question = (sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else _DEFAULT_QUESTION)
 

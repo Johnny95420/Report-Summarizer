@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import omegaconf
@@ -40,7 +41,8 @@ def create_http_session():
 
 http_session = create_http_session()
 
-# Timeout constants for the decoupled /search and /crawl endpoints
+# Timeout and retry constants for the decoupled /search and /crawl endpoints
+_MAX_RETRIES = 3
 _SEARCH_MAX_RESULTS = 10
 _SEARCH_SERVICE_TIMEOUT = 30   # passed as ?timeout= to GET /search
 _SEARCH_HTTP_TIMEOUT = 45      # requests client timeout for GET /search
@@ -256,6 +258,19 @@ def tavily_search(search_queries, include_raw_content: bool):
     return search_docs
 
 
+def _collect_unique_urls(batches: list[dict]) -> list[str]:
+    """Return ordered list of unique URLs from a list of {"results": [...]} batch dicts."""
+    seen: set[str] = set()
+    urls: list[str] = []
+    for batch in batches:
+        for result in batch.get("results", []):
+            url = result.get("url") or ""
+            if url and url not in seen:
+                urls.append(url)
+                seen.add(url)
+    return urls
+
+
 def _search_one(
     base_url: str,
     query: str,
@@ -265,7 +280,6 @@ def _search_one(
     max_results: int = _SEARCH_MAX_RESULTS,
 ) -> dict:
     """GET /search for a single query. Returns {"results": [...]} or {"results": []} on failure."""
-    max_retries = 3
     params = {
         "query": query,
         "max_results": max_results,
@@ -276,7 +290,7 @@ def _search_one(
     if time_filter != "all":
         params["time_filter"] = time_filter
 
-    for attempt in range(max_retries):
+    for attempt in range(_MAX_RETRIES):
         try:
             logger.info(f"GET /search query='{query}' attempt {attempt + 1}")
             response = http_session.get(
@@ -287,24 +301,25 @@ def _search_one(
                 return response.json()
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse /search JSON for '{query}': {e}")
-                if attempt == max_retries - 1:
+                if attempt == _MAX_RETRIES - 1:
                     return {"results": []}
                 continue
         except Timeout:
             logger.warning(f"/search timeout for '{query}' attempt {attempt + 1}")
-            if attempt == max_retries - 1:
+            if attempt == _MAX_RETRIES - 1:
                 logger.error(f"Max retries exceeded for /search '{query}' (timeout)")
                 return {"results": []}
         except ConnectionError:
             logger.warning(f"/search connection error for '{query}' attempt {attempt + 1}")
-            if attempt == max_retries - 1:
+            if attempt == _MAX_RETRIES - 1:
                 logger.error(f"Max retries exceeded for /search '{query}' (connection error)")
                 return {"results": []}
         except RequestException as e:
             logger.error(f"/search request error for '{query}': {e}")
-            if attempt == max_retries - 1:
+            if attempt == _MAX_RETRIES - 1:
                 return {"results": []}
         time.sleep(2 ** attempt)
+    return {"results": []}  # unreachable with _MAX_RETRIES > 0; guards against future refactors
 
 
 def call_search_api(
@@ -326,10 +341,15 @@ def call_search_api(
         return [{"results": []} for _ in search_queries]
 
     base_url = f"http://{host}:{port}"
-    return [
-        _search_one(base_url, query, time_filter=time_filter, gl=gl, hl=hl, max_results=max_results)
-        for query in search_queries
-    ]
+    results: list[dict] = [{}] * len(search_queries)
+    with ThreadPoolExecutor(max_workers=len(search_queries)) as pool:
+        futures = {
+            pool.submit(_search_one, base_url, q, time_filter=time_filter, gl=gl, hl=hl, max_results=max_results): i
+            for i, q in enumerate(search_queries)
+        }
+        for fut in as_completed(futures):
+            results[futures[fut]] = fut.result()
+    return results
 
 
 def call_crawl_api(urls: list[str], crawl_timeout: int = _CRAWL_SERVICE_TIMEOUT) -> dict[str, str | None]:
@@ -348,9 +368,8 @@ def call_crawl_api(urls: list[str], crawl_timeout: int = _CRAWL_SERVICE_TIMEOUT)
 
     base_url = f"http://{host}:{port}"
     fallback: dict[str, str | None] = {u: None for u in urls}
-    max_retries = 3
 
-    for attempt in range(max_retries):
+    for attempt in range(_MAX_RETRIES):
         try:
             logger.info(f"POST /crawl {len(urls)} URLs attempt {attempt + 1}")
             response = http_session.post(
@@ -364,24 +383,25 @@ def call_crawl_api(urls: list[str], crawl_timeout: int = _CRAWL_SERVICE_TIMEOUT)
                 return {r["url"]: r.get("raw_content") for r in data.get("results", [])}
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse /crawl JSON: {e}")
-                if attempt == max_retries - 1:
+                if attempt == _MAX_RETRIES - 1:
                     return fallback
                 continue
         except Timeout:
             logger.warning(f"/crawl timeout attempt {attempt + 1}")
-            if attempt == max_retries - 1:
+            if attempt == _MAX_RETRIES - 1:
                 logger.error("Max retries exceeded for /crawl (timeout)")
                 return fallback
         except ConnectionError:
             logger.warning(f"/crawl connection error attempt {attempt + 1}")
-            if attempt == max_retries - 1:
+            if attempt == _MAX_RETRIES - 1:
                 logger.error("Max retries exceeded for /crawl (connection error)")
                 return fallback
         except RequestException as e:
             logger.error(f"/crawl request error: {e}")
-            if attempt == max_retries - 1:
+            if attempt == _MAX_RETRIES - 1:
                 return fallback
         time.sleep(2 ** attempt)
+    return fallback  # unreachable with _MAX_RETRIES > 0; guards against future refactors
 
 
 def call_search_engine(
@@ -400,17 +420,7 @@ def call_search_engine(
     if not include_raw_content:
         return search_docs
 
-    # Collect unique URLs across all query results
-    seen: set[str] = set()
-    all_urls: list[str] = []
-    for batch in search_docs:
-        for result in batch.get("results", []):
-            url = result.get("url") or ""
-            if url and url not in seen:
-                all_urls.append(url)
-                seen.add(url)
-
-    raw_content_map = call_crawl_api(all_urls)
+    raw_content_map = call_crawl_api(_collect_unique_urls(search_docs))
 
     for batch in search_docs:
         for result in batch.get("results", []):
