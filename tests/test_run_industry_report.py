@@ -102,7 +102,7 @@ async def test_industry_report_end_to_end():
         # Token counting — always return a small number
         "report_writer.get_num_tokens": lambda *a, **kw: 100,
         # Web search used in _perform_planner_search
-        "report_writer.call_search_engine": lambda *a, **kw: [],
+        "report_writer.call_search_api": lambda *a, **kw: [],
         "report_writer.web_search_deduplicate_and_format_sources": lambda *a, **kw: "mock web results",
         # Agentic search subgraph used in orchestration
         "report_writer.agentic_search_graph": MagicMock(
