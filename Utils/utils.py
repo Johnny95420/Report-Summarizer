@@ -306,8 +306,6 @@ def _search_one(
                 return {"results": []}
         time.sleep(2 ** attempt)
 
-    return {"results": []}
-
 
 def call_search_api(
     search_queries: list[str],
@@ -385,8 +383,6 @@ def call_crawl_api(urls: list[str], crawl_timeout: int = _CRAWL_SERVICE_TIMEOUT)
                 return fallback
         time.sleep(2 ** attempt)
 
-    return fallback
-
 
 def call_search_engine(
     search_queries,
@@ -418,7 +414,7 @@ def call_search_engine(
 
     for batch in search_docs:
         for result in batch.get("results", []):
-            result["title"] = result.get("title", "").replace("/", "_")
+            result["title"] = result.get("title", "").replace("/", "_")  # backward-compat: normalise slash in titles
             result["raw_content"] = raw_content_map.get(result.get("url") or "")
 
     return search_docs

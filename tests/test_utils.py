@@ -148,8 +148,9 @@ class TestSearchTimeout:
 
     def test_search_timeouts_ordered(self):
         """Service timeout must be strictly less than HTTP timeout for both endpoints."""
-        assert 30 < 45   # search
-        assert 60 < 180  # crawl
+        from Utils.utils import _SEARCH_SERVICE_TIMEOUT, _SEARCH_HTTP_TIMEOUT, _CRAWL_SERVICE_TIMEOUT, _CRAWL_HTTP_TIMEOUT
+        assert _SEARCH_SERVICE_TIMEOUT < _SEARCH_HTTP_TIMEOUT
+        assert _CRAWL_SERVICE_TIMEOUT < _CRAWL_HTTP_TIMEOUT
 
     def test_call_search_api_uses_get_slash_search(self):
         """_search_one (called by call_search_api) must use GET /search, not /search_and_crawl."""
