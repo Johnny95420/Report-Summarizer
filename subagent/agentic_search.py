@@ -508,7 +508,10 @@ def crawl_filtered_results(state: AgenticSearchState) -> dict:
     into filtered_web_results so downstream nodes see complete results.
     """
     filtered_web_results = state["filtered_web_results"]
-    raw_content_map = call_crawl_api(_collect_unique_urls(filtered_web_results))
+    urls = _collect_unique_urls(filtered_web_results)
+    raw_content_map = call_crawl_api(urls)
+    fetched = sum(1 for v in raw_content_map.values() if v)
+    logger.info("crawl_filtered_results: %d URLs crawled, %d returned content", len(urls), fetched)
 
     crawled = []
     for batch in filtered_web_results:
@@ -619,12 +622,20 @@ agentic_search_graph = agentic_search_graph_builder.get_graph()
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    for _log_name in ("AgenticSearch", "Utils"):
+        _log = logging.getLogger(_log_name)
+        _log.setLevel(logging.INFO)
+        for _h in _log.handlers:
+            _h.setLevel(logging.INFO)
 
     _DEFAULT_QUESTION = (
-        "Main Question: 聯亞在 2026 年的主要營收驅動因素是什麼？"
-        "- Sub-question 1: 各產品線的營收占比為何（例如光通訊元件、雷射二極體、其他產品）？"
-        "- Sub-question 2: 主要應用市場（例如資料中心、電信、消費性電子）的營收表現如何？"
-        "- Sub-question 3: 各產品線的毛利率趨勢為何？"
+        "Main Question: 詳細說明 InP 低軌道衛星 光通訊之間的關係"
+        "- Sub-question 1: 說明 InP 產能主要用於那裡？"
+        "- Sub-question 2: InP 與低軌道衛星 光通訊之間關係？"
+        "- Sub-question 3: 這個題材台股會有哪些股票受惠？"
+        "- Sub-question 4: 我是否可以認為 InP 題材在台股中，等同於上了兩道保險，低軌道衛星跟光通訊通吃 請給出具體分析？"
     )
     question = (sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else _DEFAULT_QUESTION)
 
@@ -634,6 +645,7 @@ if __name__ == "__main__":
     import time
 
     num_iterations = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    num_queries = int(sys.argv[3]) if len(sys.argv) > 3 else 3
 
     async def _run():
         timings = []
@@ -642,7 +654,7 @@ if __name__ == "__main__":
         t_start = t_prev
 
         async for event in agentic_search_graph.astream(
-            {"question": question, "url_memo": [], "source_registry": [], "max_num_iterations": num_iterations},
+            {"question": question, "url_memo": [], "source_registry": [], "max_num_iterations": num_iterations, "num_queries": num_queries},
             stream_mode="updates",
         ):
             t_now = time.perf_counter()
