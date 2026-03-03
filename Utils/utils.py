@@ -17,6 +17,7 @@ from tavily import TavilyClient
 from urllib3.util.retry import Retry
 
 from State.state import Section
+from langfuse import observe
 from Utils.langfuse_tracing import get_langfuse_callback
 
 _cfg = omegaconf.OmegaConf.load(Path(__file__).parent.parent / "report_config.yaml")
@@ -327,6 +328,7 @@ def _search_one(
     return {"results": []}  # unreachable with _MAX_RETRIES > 0; guards against future refactors
 
 
+@observe(name="call_search_api")
 def call_search_api(
     search_queries: list[str],
     time_filter: str = "month",
@@ -357,6 +359,7 @@ def call_search_api(
     return results
 
 
+@observe(name="call_crawl_api")
 def call_crawl_api(urls: list[str], crawl_timeout: int = _CRAWL_SERVICE_TIMEOUT) -> dict[str, str | None]:
     """POST /crawl for a batch of URLs (crawled in parallel on the server).
 
