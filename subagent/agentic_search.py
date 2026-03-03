@@ -49,6 +49,8 @@ from Utils.utils import (
     call_search_api,
     web_search_deduplicate_and_format_sources,
 )
+from langfuse import observe
+from Utils.langfuse_tracing import langfuse_node
 
 # Setup logger
 logger = logging.getLogger("AgenticSearch")
@@ -589,17 +591,17 @@ class AgenticSearchGraphBuilder:
     def get_graph(self):
         if self._graph is None:
             builder = StateGraph(AgenticSearchState)
-            builder.add_node("get_searching_budget", get_searching_budget)
-            builder.add_node("generate_queries_from_question", generate_queries_from_question)
-            builder.add_node("perform_web_search", perform_web_search)
-            builder.add_node("filter_and_format_results", filter_and_format_results)
-            builder.add_node("crawl_filtered_results", crawl_filtered_results)
-            builder.add_node("chunk_large_articles", chunk_large_articles)
-            builder.add_node("compress_raw_content", compress_raw_content)
-            builder.add_node("aggregate_final_results", aggregate_final_results)
-            builder.add_node("synthesize_answer", synthesize_answer)
-            builder.add_node("check_searching_results", check_searching_results)
-            builder.add_node("finalize_answer", finalize_answer)
+            builder.add_node("get_searching_budget",           langfuse_node(get_searching_budget))
+            builder.add_node("generate_queries_from_question", langfuse_node(generate_queries_from_question))
+            builder.add_node("perform_web_search",             langfuse_node(perform_web_search))
+            builder.add_node("filter_and_format_results",      langfuse_node(filter_and_format_results))
+            builder.add_node("crawl_filtered_results",         langfuse_node(crawl_filtered_results))
+            builder.add_node("chunk_large_articles",           langfuse_node(chunk_large_articles))
+            builder.add_node("compress_raw_content",           langfuse_node(compress_raw_content))
+            builder.add_node("aggregate_final_results",        langfuse_node(aggregate_final_results))
+            builder.add_node("synthesize_answer",              langfuse_node(synthesize_answer))
+            builder.add_node("check_searching_results",        langfuse_node(check_searching_results))
+            builder.add_node("finalize_answer",                langfuse_node(finalize_answer))
 
             builder.add_edge(START, "get_searching_budget")
             builder.add_edge("get_searching_budget", "generate_queries_from_question")
@@ -647,6 +649,7 @@ if __name__ == "__main__":
     num_iterations = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     num_queries = int(sys.argv[3]) if len(sys.argv) > 3 else 3
 
+    @observe(name="agentic_search")
     async def _run():
         timings = []
         accumulated = {}  # full state accumulated from all node updates
