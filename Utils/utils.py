@@ -17,6 +17,7 @@ from tavily import TavilyClient
 from urllib3.util.retry import Retry
 
 from State.state import Section
+from Utils.langfuse_tracing import get_langfuse_callback
 
 _cfg = omegaconf.OmegaConf.load(Path(__file__).parent.parent / "report_config.yaml")
 _MAX_TOKENS: int = int(_cfg.get("MAX_TOKENS", 65536))
@@ -101,7 +102,9 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
 
     model = validated_primary.with_fallbacks([backup])
 
-    return model.invoke(prompt)
+    handler = get_langfuse_callback()
+    callbacks = [handler] if handler else []
+    return model.invoke(prompt, config={"callbacks": callbacks})
 
 
 async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, tool=None, tool_choice=None):
@@ -140,7 +143,9 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
         backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
 
     model = validated_primary.with_fallbacks([backup])
-    return await model.ainvoke(prompt)
+    handler = get_langfuse_callback()
+    callbacks = [handler] if handler else []
+    return await model.ainvoke(prompt, config={"callbacks": callbacks})
 
 
 def track_expanded_context(

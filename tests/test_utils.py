@@ -187,3 +187,64 @@ class TestSearchTimeout:
         ]
         result = _collect_unique_urls(batches)
         assert result == ["http://a.com", "http://b.com", "http://c.com"]
+
+
+# ---------------------------------------------------------------------------
+# Langfuse callback injection
+# ---------------------------------------------------------------------------
+
+def _make_mock_chain():
+    """Build a mock that mirrors call_llm's chain: primary | validate → with_fallbacks → invoke."""
+    invoke_mock = MagicMock()
+    invoke_mock.return_value = MagicMock(
+        content="answer", tool_calls=None,
+        response_metadata={"finish_reason": "stop"},
+    )
+    # The chain object returned by with_fallbacks — this is what model.invoke is called on.
+    chain = MagicMock()
+    chain.invoke = invoke_mock
+
+    # primary | RunnableLambda(...) produces a pipe mock whose with_fallbacks returns chain.
+    pipe_mock = MagicMock()
+    pipe_mock.with_fallbacks.return_value = chain
+
+    # primary.__or__ returns pipe_mock (covers the | operator in call_llm).
+    primary_mock = MagicMock()
+    primary_mock.__or__ = MagicMock(return_value=pipe_mock)
+
+    return primary_mock, invoke_mock
+
+
+def test_call_llm_passes_langfuse_handler_as_callback():
+    """call_llm injects the active Langfuse handler into model.invoke callbacks."""
+    fake_handler = MagicMock()
+    primary_mock, invoke_mock = _make_mock_chain()
+
+    with (
+        patch("Utils.utils.ChatLiteLLM", return_value=primary_mock),
+        patch("Utils.utils.get_langfuse_callback", return_value=fake_handler),
+    ):
+        from Utils.utils import call_llm
+        call_llm("model-a", "model-b", [{"role": "user", "content": "hi"}])
+
+        call_args = invoke_mock.call_args
+        assert call_args is not None, "model.invoke was not called"
+        config_passed = call_args.kwargs.get("config") or {}
+        assert fake_handler in config_passed.get("callbacks", [])
+
+
+def test_call_llm_skips_callback_when_no_trace():
+    """call_llm passes empty callbacks when no Langfuse trace is active."""
+    primary_mock, invoke_mock = _make_mock_chain()
+
+    with (
+        patch("Utils.utils.ChatLiteLLM", return_value=primary_mock),
+        patch("Utils.utils.get_langfuse_callback", return_value=None),
+    ):
+        from Utils.utils import call_llm
+        call_llm("model-a", "model-b", [{"role": "user", "content": "hi"}])
+
+        call_args = invoke_mock.call_args
+        assert call_args is not None, "model.invoke was not called"
+        config_passed = call_args.kwargs.get("config") or {}
+        assert config_passed.get("callbacks", []) == []
