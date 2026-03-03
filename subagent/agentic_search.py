@@ -244,6 +244,7 @@ def perform_web_search(state: AgenticSearchState):
     }
 
 
+@observe(name="filter_and_format_results")
 async def filter_and_format_results(state: AgenticSearchState):
     followed_up_queries = state.get("followed_up_queries", [])
     queries = followed_up_queries if followed_up_queries else state["queries"]
@@ -306,6 +307,7 @@ async def filter_and_format_results(state: AgenticSearchState):
     return {"filtered_web_results": filtered_web_results}
 
 
+@observe(name="compress_raw_content")
 async def compress_raw_content(state: AgenticSearchState):
     followed_up_queries = state.get("followed_up_queries", [])
     queries = followed_up_queries if followed_up_queries else state["queries"]
@@ -594,10 +596,10 @@ class AgenticSearchGraphBuilder:
             builder.add_node("get_searching_budget",           langfuse_node(get_searching_budget))
             builder.add_node("generate_queries_from_question", langfuse_node(generate_queries_from_question))
             builder.add_node("perform_web_search",             langfuse_node(perform_web_search))
-            builder.add_node("filter_and_format_results",      langfuse_node(filter_and_format_results))
+            builder.add_node("filter_and_format_results",      filter_and_format_results)
             builder.add_node("crawl_filtered_results",         langfuse_node(crawl_filtered_results))
             builder.add_node("chunk_large_articles",           langfuse_node(chunk_large_articles))
-            builder.add_node("compress_raw_content",           langfuse_node(compress_raw_content))
+            builder.add_node("compress_raw_content",           compress_raw_content)
             builder.add_node("aggregate_final_results",        langfuse_node(aggregate_final_results))
             builder.add_node("synthesize_answer",              langfuse_node(synthesize_answer))
             builder.add_node("check_searching_results",        langfuse_node(check_searching_results))
@@ -633,11 +635,9 @@ if __name__ == "__main__":
             _h.setLevel(logging.INFO)
 
     _DEFAULT_QUESTION = (
-        "Main Question: 詳細說明 InP 低軌道衛星 光通訊之間的關係"
-        "- Sub-question 1: 說明 InP 產能主要用於那裡？"
-        "- Sub-question 2: InP 與低軌道衛星 光通訊之間關係？"
-        "- Sub-question 3: 這個題材台股會有哪些股票受惠？"
-        "- Sub-question 4: 我是否可以認為 InP 題材在台股中，等同於上了兩道保險，低軌道衛星跟光通訊通吃 請給出具體分析？"
+        "Time point: 2026 Main Question: 泰國在 2026 年轉型為全球高階電子與 PCB 產業核心基地，其對全球供應鏈韌性的結構性影響為何？"
+        "- Sub-question 1: 台灣 PCB 產業鏈（如泰鼎-KY、聯茂、騰輝電子-KY 等）在泰國形成的群聚效應，如何建立其在東協市場的技術與成本門檻，並對原本以中國為主的供應鏈產生何種替代效應？"
+        "- Sub-question 2: 泰國生產基地如何實現從傳統消費性電子向「高價值量」與「先進封裝」材料端的技術轉型？"
     )
     question = (sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else _DEFAULT_QUESTION)
 
