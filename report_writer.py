@@ -79,7 +79,6 @@ from Utils.utils import (
     track_expanded_context,
     web_search_deduplicate_and_format_sources,
 )
-from langfuse import observe
 from Utils.langfuse_tracing import langfuse_node
 
 logger = logging.getLogger("AgentLogger")
