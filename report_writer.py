@@ -79,6 +79,7 @@ from Utils.utils import (
     track_expanded_context,
     web_search_deduplicate_and_format_sources,
 )
+from Utils.langfuse_tracing import langfuse_node
 
 logger = logging.getLogger("AgentLogger")
 logger.setLevel(logging.INFO)
@@ -771,9 +772,9 @@ class ReportGraphBuilder:
     def _build_section_graph(self) -> StateGraph:
         """Build the section subgraph (shared by sync/async)."""
         section_builder = StateGraph(SectionState, output_schema=SectionOutputState)
-        section_builder.add_node("generate_question", generate_question)
-        section_builder.add_node("orchestration", orchestration)
-        section_builder.add_node("write_section", write_section)
+        section_builder.add_node("generate_question", langfuse_node(generate_question))
+        section_builder.add_node("orchestration",     langfuse_node(orchestration))
+        section_builder.add_node("write_section",     langfuse_node(write_section))
 
         section_builder.add_edge(START, "generate_question")
         section_builder.add_edge("generate_question", "orchestration")
@@ -784,14 +785,14 @@ class ReportGraphBuilder:
     def _build_main_graph(self, section_graph: StateGraph) -> StateGraph:
         """Build the main report graph (shared by sync/async)."""
         builder = StateGraph(ReportState, input_schema=ReportStateInput, output_schema=ReportStateOutput)
-        builder.add_node("generate_report_plan", generate_report_plan)
-        builder.add_node("human_feedback", human_feedback)
+        builder.add_node("generate_report_plan",           langfuse_node(generate_report_plan))
+        builder.add_node("human_feedback",                  langfuse_node(human_feedback))
         builder.add_node("build_section_with_web_research", section_graph.compile())
-        builder.add_node("route", route_node)
-        builder.add_node("refine_sections", refine_sections)
-        builder.add_node("gather_complete_section", gather_complete_section)
-        builder.add_node("write_final_sections", write_final_sections)
-        builder.add_node("compile_final_report", compile_final_report)
+        builder.add_node("route",                           langfuse_node(route_node))
+        builder.add_node("refine_sections",                 langfuse_node(refine_sections))
+        builder.add_node("gather_complete_section",         langfuse_node(gather_complete_section))
+        builder.add_node("write_final_sections",            langfuse_node(write_final_sections))
+        builder.add_node("compile_final_report",            langfuse_node(compile_final_report))
 
         builder.add_edge(START, "generate_report_plan")
         builder.add_edge("generate_report_plan", "human_feedback")

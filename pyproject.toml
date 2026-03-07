@@ -27,6 +27,7 @@ dependencies = [
     "langchain-classic",
     "langchain-text-splitters",
     "litellm",
+    "langfuse",
     "tavily-python",
 
     # Data Processing
