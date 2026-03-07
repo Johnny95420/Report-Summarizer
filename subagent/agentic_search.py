@@ -2,7 +2,9 @@ import asyncio
 import copy
 import logging
 import pathlib
+import re
 import sys
+import uuid
 
 # Ensure project root is on sys.path when run as a script (python subagent/agentic_search.py)
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -22,7 +24,10 @@ VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
 BACKUP_VERIFY_MODEL_NAME = config["BACKUP_VERIFY_MODEL_NAME"]
 
 from langchain_community.callbacks.infino_callback import get_num_tokens
+from langchain_community.vectorstores import Chroma
+from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
@@ -35,12 +40,17 @@ from Tools.tools import (
     searching_grader_formatter,
     summary_formatter,
 )
+from Utils.embeddings import get_embedding_model
 from Utils.utils import (
+    _collect_unique_urls,
+    call_crawl_api,
     call_llm,
     call_llm_async,
-    selenium_api_search,
+    call_search_api,
     web_search_deduplicate_and_format_sources,
 )
+from langfuse import observe
+from Utils.langfuse_tracing import langfuse_node
 
 # Setup logger
 logger = logging.getLogger("AgenticSearch")
@@ -50,6 +60,44 @@ console_handler.setLevel(logging.ERROR)
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
+
+
+def _format_sources_section(answer: str, registry: list[dict]) -> str:
+    """Re-number [N] citations sequentially and append ### Sources from registry.
+
+    Args:
+        answer: Answer body with [N] inline citations but no ### Sources section.
+        registry: Ordered list of {title, url}; index+1 = citation number.
+
+    Returns:
+        Answer with citations renumbered 1-based and ### Sources appended.
+        Returns original answer unchanged if registry is empty or no citations found.
+    """
+    if not registry or not answer:
+        return answer
+
+    # Strip any LLM-written ### Sources section before extracting citations,
+    # so those [N] numbers don't pollute the cited set.
+    body = re.split(r'\n+###\s*Sources\b', answer)[0].rstrip()
+
+    cited = sorted(set(int(m) for m in re.findall(r'\[(\d+)\]', body)))
+    if not cited:
+        return answer
+
+    remap = {orig: new for new, orig in enumerate(cited, 1)}
+    renumbered = re.sub(
+        r'\[(\d+)\]',
+        lambda m: f"[{remap.get(int(m.group(1)), int(m.group(1)))}]",
+        body,
+    )
+
+    lines = ["### Sources"]
+    for orig in cited:
+        idx = orig - 1  # registry is 0-based
+        if 0 <= idx < len(registry):
+            lines.append(f"- [{remap[orig]}] {registry[idx]['title']} — {registry[idx]['url']}")
+
+    return renumbered + "\n\n" + "\n".join(lines)
 
 
 def select_model_based_on_tokens(content: str, token_threshold: int = 4096) -> tuple[str, str]:
@@ -74,7 +122,7 @@ def select_model_based_on_tokens(content: str, token_threshold: int = 4096) -> t
 
 
 # TODO:The final results are not getting better after applied this node
-def queries_rewriter(queries: list[str]) -> list[str]:
+def queries_rewriter(queries: list[str], gl: str = "tw", hl: str = "zh-tw", time_filter: str = "month") -> dict:
     str_queries = ""
     for idx, q in enumerate(queries):
         str_queries += f"{idx}. {q}\n"
@@ -89,11 +137,15 @@ def queries_rewriter(queries: list[str]) -> list[str]:
         tool_choice="required",
     )
     try:
-        queries = results.tool_calls[0]["args"]["queries"]
+        args = results.tool_calls[0]["args"]
+        queries = args["queries"]
+        gl = args.get("gl", gl)
+        hl = args.get("hl", hl)
+        time_filter = args.get("time_filter", time_filter)
     except (IndexError, KeyError, TypeError) as e:
         logger.error("Failed to parse rewritten queries: %s", e)
-        return queries  # return original queries unchanged
-    return queries
+        return {"queries": queries, "gl": gl, "hl": hl, "time_filter": time_filter}
+    return {"queries": queries, "gl": gl, "hl": hl, "time_filter": time_filter}
 
 
 async def check_search_quality_async(query: str, document: str) -> int:
@@ -111,7 +163,7 @@ async def check_search_quality_async(query: str, document: str) -> int:
     try:
         score = results.tool_calls[0]["args"]["score"]
     except (IndexError, KeyError, TypeError) as e:
-        logger.warning("Failed to parse quality score: %s", e)
+        logger.error("Failed to parse quality score: %s", e)
         score = 0
     return score
 
@@ -126,8 +178,9 @@ def get_searching_budget(state: AgenticSearchState):
 def generate_queries_from_question(state: AgenticSearchState):
     """Generate keyword-based search queries from the research question."""
     question = state["question"]
+    num_queries = state.get("num_queries") or 3
 
-    system_instruction = query_writer_instructions.format(question=question)
+    system_instruction = query_writer_instructions.format(question=question, num_queries=num_queries)
     result = call_llm(
         MODEL_NAME,
         BACKUP_MODEL_NAME,
@@ -137,18 +190,25 @@ def generate_queries_from_question(state: AgenticSearchState):
         tool_choice="required",
     )
     try:
-        queries = result.tool_calls[0]["args"]["queries"]
+        args = result.tool_calls[0]["args"]
+        queries = args["queries"]
+        gl = args.get("gl", "tw")
+        hl = args.get("hl", "zh-tw")
+        time_filter = args.get("time_filter", "month")
     except (IndexError, KeyError, TypeError) as e:
         logger.error("Failed to parse queries from question: %s", e)
         # Fallback: use the question itself as a single query
         queries = [question]
+        gl = "tw"
+        hl = "zh-tw"
+        time_filter = "month"
 
-    logger.info("Generated %d queries from question", len(queries))
-    return {"queries": queries}
+    logger.info("Generated %d queries from question (gl=%s, hl=%s, time_filter=%s)", len(queries), gl, hl, time_filter)
+    return {"queries": queries, "gl": gl, "hl": hl, "time_filter": time_filter}
 
 
 def perform_web_search(state: AgenticSearchState):
-    url_memo = state.get("url_memo", set())
+    url_memo = set(state.get("url_memo", []))
     queries = state["queries"]
     curr_num_iterations = state.get("curr_num_iterations", 0)
     followed_up_queries = state.get("followed_up_queries", [])
@@ -162,13 +222,17 @@ def perform_web_search(state: AgenticSearchState):
         queries = state["queries"]
         logger.info(f"Performing web search for queries: {queries}")
 
-    web_results = selenium_api_search(queries, True)
+    gl = state.get("gl", "tw")
+    hl = state.get("hl", "zh-tw")
+    time_filter = state.get("time_filter", "month")
+    queries = list(dict.fromkeys(queries))  # remove duplicate queries, preserve order
+    web_results = call_search_api(queries, time_filter=time_filter, gl=gl, hl=hl)
     dedup_results = []
     for results in web_results:
         dedup_results.append({"results": []})
         for result in results["results"]:
             if result["url"] not in url_memo:
-                # Only track real URLs in url_memo; _partN chunk keys are ephemeral
+                # chunk_large_articles reuses original URLs; only register http URLs to avoid duplicate tracking
                 if result["url"].startswith("http"):
                     url_memo.add(result["url"])
                 dedup_results[-1]["results"].append(result)
@@ -176,10 +240,11 @@ def perform_web_search(state: AgenticSearchState):
     return {
         "web_results": dedup_results,
         "curr_num_iterations": curr_num_iterations + 1,
-        "url_memo": url_memo,
+        "url_memo": list(url_memo),
     }
 
 
+@observe(name="filter_and_format_results")
 async def filter_and_format_results(state: AgenticSearchState):
     followed_up_queries = state.get("followed_up_queries", [])
     queries = followed_up_queries if followed_up_queries else state["queries"]
@@ -194,10 +259,14 @@ async def filter_and_format_results(state: AgenticSearchState):
         async with semaphore:
             try:
                 raw = result.get('raw_content') or ""
-                raw_preview = raw[:500] + "...[greater than 500 words truncated]" if len(raw) > 500 else raw
-                document = (
-                    f"Title:{result['title']}\n\nContent:{result['content']}\n\nRaw Content:{raw_preview}"
-                )
+                if raw:
+                    raw_section = (
+                        "\n\nRaw Content:" + raw[:500] +
+                        ("...[greater than 500 characters truncated]" if len(raw) > 500 else "")
+                    )
+                else:
+                    raw_section = "\n\n(Raw content not yet fetched — evaluate based on title and snippet only.)"
+                document = f"Title:{result['title']}\n\nContent:{result['content']}{raw_section}"
                 score = await check_search_quality_async(query, document)
                 return query, result, score
             except Exception as e:
@@ -238,6 +307,7 @@ async def filter_and_format_results(state: AgenticSearchState):
     return {"filtered_web_results": filtered_web_results}
 
 
+@observe(name="compress_raw_content")
 async def compress_raw_content(state: AgenticSearchState):
     followed_up_queries = state.get("followed_up_queries", [])
     queries = followed_up_queries if followed_up_queries else state["queries"]
@@ -245,8 +315,6 @@ async def compress_raw_content(state: AgenticSearchState):
 
     # Increase semaphore: fewer LLM calls after pass-through means higher concurrency is safe
     semaphore = asyncio.Semaphore(4)
-
-    _COMPRESS_CHAR_THRESHOLD = 5000
 
     async def compress_content_with_metadata(query_idx: int, result_idx: int, query: str, result: dict):
         """Compress content with semaphore control and metadata preservation.
@@ -333,10 +401,23 @@ async def compress_raw_content(state: AgenticSearchState):
 
 
 def aggregate_final_results(state: AgenticSearchState):
-    """Format current iteration's search results into materials (reset each round)."""
+    """Format current iteration's search results into materials and update source registry."""
     compressed_web_results = state["compressed_web_results"]
     materials = web_search_deduplicate_and_format_sources(compressed_web_results, True)
-    return {"materials": materials}
+
+    # Layer 2 dedup: guard against URLs already in the registry
+    existing_urls = {e["url"] for e in state.get("source_registry", [])}
+    # Within-iteration dedup: same URL from multiple queries in this round
+    seen_this_round: set[str] = set()
+    new_entries: list[dict] = []
+    for query_results in compressed_web_results:
+        for result in query_results["results"]:
+            url = result.get("url", "")
+            if url and url.startswith("http") and url not in existing_urls and url not in seen_this_round:
+                new_entries.append({"title": result.get("title", ""), "url": url})
+                seen_this_round.add(url)
+
+    return {"materials": materials, "source_registry": new_entries}
 
 
 def synthesize_answer(state: AgenticSearchState):
@@ -344,11 +425,18 @@ def synthesize_answer(state: AgenticSearchState):
     question = state["question"]
     materials = state.get("materials", "")
     previous_answer = state.get("answer", "")
+    source_registry = state.get("source_registry", [])
+
+    registry_str = "\n".join(
+        f"[{i+1}] {e['title']} — {e['url']}"
+        for i, e in enumerate(source_registry)
+    ) or "(no sources registered yet)"
 
     system_instruction = answer_synthesizer_instructions.format(
         question=question,
         previous_answer=previous_answer,
         materials=materials,
+        source_registry=registry_str,
     )
 
     result = call_llm(
@@ -379,7 +467,7 @@ def check_searching_results(state: AgenticSearchState):
     question = state["question"]
     answer = state.get("answer", "")
     if state["curr_num_iterations"] >= state["max_num_iterations"]:
-        return Command(goto=END)
+        return Command(goto="finalize_answer")
 
     system_instruction = searching_results_grader.format(question=question, answer=answer)
 
@@ -395,14 +483,107 @@ def check_searching_results(state: AgenticSearchState):
         feedback = feedback.tool_calls[0]["args"]
     except (IndexError, KeyError, TypeError) as e:
         logger.error("Failed to parse search grader feedback: %s", e)
-        return Command(goto=END)
+        return Command(goto="finalize_answer")
     if feedback["grade"] == "pass":
-        return Command(goto=END)
+        return Command(goto="finalize_answer")
     else:
+        follow_up_queries = feedback["follow_up_queries"]
+        if isinstance(follow_up_queries, str):
+            follow_up_queries = [follow_up_queries]
         return Command(
-            update={"followed_up_queries": feedback["follow_up_queries"]},
+            update={"followed_up_queries": follow_up_queries},
             goto="perform_web_search",
         )
+
+
+def finalize_answer(state: AgenticSearchState) -> dict:
+    """Append ### Sources section to answer using source_registry (no LLM call)."""
+    return {"answer": _format_sources_section(
+        state.get("answer", ""),
+        state.get("source_registry", []),
+    )}
+
+
+def crawl_filtered_results(state: AgenticSearchState) -> dict:
+    """Fetch raw_content for all quality-filtered URLs using POST /crawl.
+
+    Collects unique URLs from filtered_web_results, issues a single batch
+    POST /crawl call (server-side parallel), then merges raw_content back
+    into filtered_web_results so downstream nodes see complete results.
+    """
+    filtered_web_results = state["filtered_web_results"]
+    urls = _collect_unique_urls(filtered_web_results)
+    raw_content_map = call_crawl_api(urls)
+    fetched = sum(1 for v in raw_content_map.values() if v)
+    logger.info("crawl_filtered_results: %d URLs crawled, %d returned content", len(urls), fetched)
+
+    crawled = []
+    for batch in filtered_web_results:
+        new_batch: dict = {"results": []}
+        for result in batch.get("results", []):
+            url = result.get("url") or ""
+            new_batch["results"].append({**result, "raw_content": raw_content_map.get(url)})
+        crawled.append(new_batch)
+
+    return {"filtered_web_results": crawled}
+
+
+_CHUNK_THRESHOLD = 5000  # chars; articles shorter than this pass through chunk_large_articles unchanged
+_COMPRESS_CHAR_THRESHOLD = 5000  # chars; content shorter than this passes through compress_raw_content unchanged
+
+
+def chunk_large_articles(state: AgenticSearchState) -> dict:
+    """Replace long raw_content with query-relevant chunks (per-article isolation).
+
+    Each article longer than _CHUNK_THRESHOLD chars is split into chunks, embedded
+    into an ephemeral in-memory Chroma collection, and queried with the search query.
+    The top-k most relevant chunks are joined with a '---' separator and returned as
+    a single result entry (same url and title, replaced raw_content). Keeping one entry
+    per URL avoids silent deduplication in web_search_deduplicate_and_format_sources.
+    On any error, the article is truncated to _CHUNK_THRESHOLD chars instead.
+    """
+    followed_up_queries = state.get("followed_up_queries", [])
+    queries = followed_up_queries if followed_up_queries else state["queries"]
+    filtered_web_results = state["filtered_web_results"]
+
+    embeddings = get_embedding_model()
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50,
+        separators=["\n\n\n", "\n\n", "\n", ""],
+    )
+
+    output = [{"results": []} for _ in filtered_web_results]
+    for q_idx, (query, query_results) in enumerate(zip(queries, filtered_web_results)):
+        for result in query_results["results"]:
+            raw = result.get("raw_content") or ""
+            if len(raw) < _CHUNK_THRESHOLD:
+                output[q_idx]["results"].append(result)
+                continue
+            try:
+                docs = [Document(chunk) for chunk in splitter.split_text(raw)]
+                collection_name = f"chunk_{uuid.uuid4().hex}"  # unique name avoids cross-article conflicts
+                vs = Chroma.from_documents(docs, embeddings, collection_name=collection_name)
+                try:
+                    hits = vs.similarity_search(query, k=5)
+                finally:
+                    try:
+                        vs.delete_collection()  # explicitly release in-memory collection
+                    except Exception:
+                        pass  # collection may already be gone if similarity_search failed
+                if not hits:
+                    output[q_idx]["results"].append({**result, "raw_content": raw[:_CHUNK_THRESHOLD]})
+                else:
+                    chunk_blocks = "\n\n".join(
+                        f"Chunk {i}:\n{hit.page_content}" for i, hit in enumerate(hits, 1)
+                    )
+                    joined = f"[RAG Retrieved Chunks]\n\n{chunk_blocks}"
+                    output[q_idx]["results"].append({**result, "raw_content": joined})
+            except Exception as e:
+                logger.error("chunk_large_articles failed for '%s': %s", result.get("url"), e)
+                output[q_idx]["results"].append({**result, "raw_content": raw[:_CHUNK_THRESHOLD]})
+
+    return {"filtered_web_results": output}
 
 
 class AgenticSearchGraphBuilder:
@@ -412,23 +593,33 @@ class AgenticSearchGraphBuilder:
     def get_graph(self):
         if self._graph is None:
             builder = StateGraph(AgenticSearchState)
-            builder.add_node("get_searching_budget", get_searching_budget)
-            builder.add_node("generate_queries_from_question", generate_queries_from_question)
-            builder.add_node("perform_web_search", perform_web_search)
-            builder.add_node("filter_and_format_results", filter_and_format_results)
-            builder.add_node("compress_raw_content", compress_raw_content)
-            builder.add_node("aggregate_final_results", aggregate_final_results)
-            builder.add_node("synthesize_answer", synthesize_answer)
-            builder.add_node("check_searching_results", check_searching_results)
+            builder.add_node("get_searching_budget",           langfuse_node(get_searching_budget))
+            builder.add_node("generate_queries_from_question", langfuse_node(generate_queries_from_question))
+            builder.add_node("perform_web_search",             langfuse_node(perform_web_search))
+            # Registered without langfuse_node: these are async functions and langfuse_node
+            # wrapping async nodes silently drops spans in Langfuse 3.x OTLP mode.
+            # @observe is applied directly on the function definitions above instead.
+            # Sync nodes (all others in this graph) use langfuse_node safely.
+            builder.add_node("filter_and_format_results",      filter_and_format_results)
+            builder.add_node("crawl_filtered_results",         langfuse_node(crawl_filtered_results))
+            builder.add_node("chunk_large_articles",           langfuse_node(chunk_large_articles))
+            builder.add_node("compress_raw_content",           compress_raw_content)
+            builder.add_node("aggregate_final_results",        langfuse_node(aggregate_final_results))
+            builder.add_node("synthesize_answer",              langfuse_node(synthesize_answer))
+            builder.add_node("check_searching_results",        langfuse_node(check_searching_results))
+            builder.add_node("finalize_answer",                langfuse_node(finalize_answer))
 
             builder.add_edge(START, "get_searching_budget")
             builder.add_edge("get_searching_budget", "generate_queries_from_question")
             builder.add_edge("generate_queries_from_question", "perform_web_search")
             builder.add_edge("perform_web_search", "filter_and_format_results")
-            builder.add_edge("filter_and_format_results", "compress_raw_content")
+            builder.add_edge("filter_and_format_results", "crawl_filtered_results")
+            builder.add_edge("crawl_filtered_results", "chunk_large_articles")
+            builder.add_edge("chunk_large_articles", "compress_raw_content")
             builder.add_edge("compress_raw_content", "aggregate_final_results")
             builder.add_edge("aggregate_final_results", "synthesize_answer")
             builder.add_edge("synthesize_answer", "check_searching_results")
+            builder.add_edge("finalize_answer", END)
 
             self._graph = builder.compile()
         return self._graph
@@ -439,12 +630,18 @@ agentic_search_graph = agentic_search_graph_builder.get_graph()
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    for _log_name in ("AgenticSearch", "Utils"):
+        _log = logging.getLogger(_log_name)
+        _log.setLevel(logging.INFO)
+        for _h in _log.handlers:
+            _h.setLevel(logging.INFO)
 
     _DEFAULT_QUESTION = (
-        "Main Question: What are Tesla's key revenue drivers in 2024?\n"
-        "- Sub-question 1: What is the automotive vs. energy revenue split?\n"
-        "- Sub-question 2: How did FSD subscription revenue perform?\n"
-        "- Sub-question 3: What were the gross margin trends by segment?"
+        "Time point: 2026 Main Question: 泰國在 2026 年轉型為全球高階電子與 PCB 產業核心基地，其對全球供應鏈韌性的結構性影響為何？"
+        "- Sub-question 1: 台灣 PCB 產業鏈（如泰鼎-KY、聯茂、騰輝電子-KY 等）在泰國形成的群聚效應，如何建立其在東協市場的技術與成本門檻，並對原本以中國為主的供應鏈產生何種替代效應？"
+        "- Sub-question 2: 泰國生產基地如何實現從傳統消費性電子向「高價值量」與「先進封裝」材料端的技術轉型？"
     )
     question = (sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else _DEFAULT_QUESTION)
 
@@ -454,7 +651,9 @@ if __name__ == "__main__":
     import time
 
     num_iterations = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    num_queries = int(sys.argv[3]) if len(sys.argv) > 3 else 3
 
+    @observe(name="agentic_search")
     async def _run():
         timings = []
         accumulated = {}  # full state accumulated from all node updates
@@ -462,7 +661,7 @@ if __name__ == "__main__":
         t_start = t_prev
 
         async for event in agentic_search_graph.astream(
-            {"question": question, "url_memo": set(), "max_num_iterations": num_iterations},
+            {"question": question, "url_memo": [], "source_registry": [], "max_num_iterations": num_iterations, "num_queries": num_queries},
             stream_mode="updates",
         ):
             t_now = time.perf_counter()
@@ -471,7 +670,12 @@ if __name__ == "__main__":
                 timings.append((node_name, elapsed))
                 print(f"  [{elapsed:6.2f}s] {node_name}")
                 if isinstance(node_updates, dict):
-                    accumulated.update(node_updates)
+                    for k, v in node_updates.items():
+                        if k == "source_registry" and isinstance(v, list):
+                            accumulated.setdefault("source_registry", [])
+                            accumulated["source_registry"].extend(v)
+                        else:
+                            accumulated[k] = v
             t_prev = t_now
 
         total = time.perf_counter() - t_start
@@ -487,6 +691,9 @@ if __name__ == "__main__":
 
     print("\n[answer]\n")
     print(final_state.get("answer", "(no answer)"))
+    print("\n[source_registry]")
+    for i, entry in enumerate(final_state.get("source_registry", []), 1):
+        print(f"  [{i}] {entry.get('title', '')} — {entry.get('url', '')}")
     print("\n[url_memo]")
     for url in sorted(final_state.get("url_memo", [])):
         print(f"  {url}")

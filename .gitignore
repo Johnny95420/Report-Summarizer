@@ -41,3 +41,8 @@ AGENTS.md
 
 # ── Git worktrees ─────────────────────────────────────────────────────
 .worktrees/
+design_doc/
+temp/
+docs/
+*sqlite
+test_report_output.md

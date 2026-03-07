@@ -4,7 +4,6 @@ import asyncio
 import logging
 from unittest.mock import MagicMock, patch
 
-import pytest
 from langgraph.graph import END
 
 from subagent.agentic_search import (
@@ -12,7 +11,9 @@ from subagent.agentic_search import (
     check_search_quality_async,
     check_searching_results,
     compress_raw_content,
+    crawl_filtered_results,
     filter_and_format_results,
+    finalize_answer,
     generate_queries_from_question,
     perform_web_search,
     queries_rewriter,
@@ -25,28 +26,37 @@ from subagent.agentic_search import (
 # ---------------------------------------------------------------------------
 class TestQueriesRewriterGuard:
     def test_returns_original_on_empty_tool_calls(self):
-        """When tool_calls is empty, should return original queries unchanged."""
+        """When tool_calls is empty, should return dict with original queries unchanged."""
         mock_result = MagicMock()
         mock_result.tool_calls = []
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             result = queries_rewriter(["query A", "query B"])
-        assert result == ["query A", "query B"]
+        assert result["queries"] == ["query A", "query B"]
+        assert "gl" in result
+        assert "hl" in result
+        assert "time_filter" in result
 
     def test_returns_original_on_missing_args_key(self):
-        """When tool_calls[0] has no 'queries' key in args, should return original."""
+        """When tool_calls[0] has no 'queries' key in args, should return dict with original."""
         mock_result = MagicMock()
         mock_result.tool_calls = [{"args": {"wrong_key": "value"}}]
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             result = queries_rewriter(["original"])
-        assert result == ["original"]
+        assert result["queries"] == ["original"]
+        assert "gl" in result
+        assert "hl" in result
+        assert "time_filter" in result
 
     def test_returns_rewritten_on_success(self):
-        """Normal path: should return the rewritten queries."""
+        """Normal path: should return dict with rewritten queries and search params."""
         mock_result = MagicMock()
         mock_result.tool_calls = [{"args": {"queries": ["rewritten A", "rewritten B"]}}]
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             result = queries_rewriter(["query A", "query B"])
-        assert result == ["rewritten A", "rewritten B"]
+        assert result["queries"] == ["rewritten A", "rewritten B"]
+        assert "gl" in result
+        assert "hl" in result
+        assert "time_filter" in result
 
 
 # ---------------------------------------------------------------------------
@@ -96,11 +106,11 @@ class TestCompressRawContentGuard:
 
 
 # ---------------------------------------------------------------------------
-# C8 — Guard #4: check_searching_results returns END on parse failure
+# C8 — Guard #4: check_searching_results routes to finalize_answer on parse failure
 # ---------------------------------------------------------------------------
 class TestCheckSearchingResultsGuard:
-    def test_routes_to_end_on_parse_failure(self):
-        """When feedback tool_calls parse fails, should return Command(goto=END)."""
+    def test_routes_to_finalize_on_parse_failure(self):
+        """When feedback tool_calls parse fails, should return Command(goto='finalize_answer')."""
         mock_result = MagicMock()
         mock_result.tool_calls = []  # empty → IndexError
         state = {
@@ -111,10 +121,10 @@ class TestCheckSearchingResultsGuard:
         }
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             cmd = check_searching_results(state)
-        assert cmd.goto == END
+        assert cmd.goto == "finalize_answer"
 
-    def test_routes_to_end_on_pass(self):
-        """Normal path: grade='pass' should route to END."""
+    def test_routes_to_finalize_on_pass(self):
+        """Normal path: grade='pass' should route to finalize_answer."""
         mock_result = MagicMock()
         mock_result.tool_calls = [{"args": {"grade": "pass", "follow_up_queries": []}}]
         state = {
@@ -125,7 +135,7 @@ class TestCheckSearchingResultsGuard:
         }
         with patch("subagent.agentic_search.call_llm", return_value=mock_result):
             cmd = check_searching_results(state)
-        assert cmd.goto == END
+        assert cmd.goto == "finalize_answer"
 
     def test_routes_to_search_on_fail(self):
         """Normal path: grade='fail' should route back to perform_web_search."""
@@ -142,8 +152,8 @@ class TestCheckSearchingResultsGuard:
         assert cmd.goto == "perform_web_search"
         assert cmd.update["followed_up_queries"] == ["follow up"]
 
-    def test_routes_to_end_when_iterations_exhausted(self):
-        """When curr_num_iterations >= max_num_iterations, skip LLM and go to END."""
+    def test_routes_to_finalize_when_iterations_exhausted(self):
+        """When curr_num_iterations >= max_num_iterations, skip LLM and go to finalize_answer."""
         state = {
             "question": "What are Tesla's key revenue drivers?",
             "answer": "Some answer",
@@ -153,7 +163,7 @@ class TestCheckSearchingResultsGuard:
         with patch("subagent.agentic_search.call_llm") as mock_llm:
             cmd = check_searching_results(state)
         mock_llm.assert_not_called()
-        assert cmd.goto == END
+        assert cmd.goto == "finalize_answer"
 
 
 # ---------------------------------------------------------------------------
@@ -164,37 +174,37 @@ class TestFollowedUpQueriesDefault:
         """Missing followed_up_queries key should default to [] not '' (I10 fix)."""
         state = {
             "queries": ["test query"],
-            "url_memo": set(),
+            "url_memo": [],
             "curr_num_iterations": 0,
             # followed_up_queries intentionally absent
         }
-        with patch("subagent.agentic_search.selenium_api_search", return_value=[{"results": []}]) as mock_search:
+        with patch("subagent.agentic_search.call_search_api", return_value=[{"results": []}]) as mock_search:
             result = perform_web_search(state)
         assert result["curr_num_iterations"] == 1
         # Should have searched with original queries, not empty string
-        mock_search.assert_called_once_with(["test query"], True)
+        mock_search.assert_called_once_with(["test query"], time_filter="month", gl="tw", hl="zh-tw")
 
     def test_perform_web_search_with_followed_up_queries(self):
         """When followed_up_queries is present and non-empty, use it instead of queries."""
         state = {
             "queries": ["original"],
             "followed_up_queries": ["follow up query"],
-            "url_memo": set(),
+            "url_memo": [],
             "curr_num_iterations": 0,
         }
-        with patch("subagent.agentic_search.selenium_api_search", return_value=[{"results": []}]) as mock_search:
+        with patch("subagent.agentic_search.call_search_api", return_value=[{"results": []}]) as mock_search:
             perform_web_search(state)
-        mock_search.assert_called_once_with(["follow up query"], True)
+        mock_search.assert_called_once_with(["follow up query"], time_filter="month", gl="tw", hl="zh-tw")
 
     def test_url_memo_returned_in_state(self):
         """url_memo must be included in the return dict so LangGraph persists it across iterations."""
         state = {
             "queries": ["q1"],
-            "url_memo": set(),
+            "url_memo": [],
             "curr_num_iterations": 0,
         }
         fake_results = [{"results": [{"url": "http://a.com", "title": "A", "content": "c", "raw_content": "r"}]}]
-        with patch("subagent.agentic_search.selenium_api_search", return_value=fake_results):
+        with patch("subagent.agentic_search.call_search_api", return_value=fake_results):
             result = perform_web_search(state)
         assert "url_memo" in result
         assert "http://a.com" in result["url_memo"]
@@ -204,11 +214,11 @@ class TestFollowedUpQueriesDefault:
         seen_url = "http://dup.com"
         state_iter1 = {
             "queries": ["q1"],
-            "url_memo": set(),
+            "url_memo": [],
             "curr_num_iterations": 0,
         }
         fake_results = [{"results": [{"url": seen_url, "title": "T", "content": "c", "raw_content": "r"}]}]
-        with patch("subagent.agentic_search.selenium_api_search", return_value=fake_results):
+        with patch("subagent.agentic_search.call_search_api", return_value=fake_results):
             result1 = perform_web_search(state_iter1)
 
         # Simulate LangGraph feeding back the returned url_memo as the next iteration's state
@@ -217,7 +227,7 @@ class TestFollowedUpQueriesDefault:
             "url_memo": result1["url_memo"],
             "curr_num_iterations": result1["curr_num_iterations"],
         }
-        with patch("subagent.agentic_search.selenium_api_search", return_value=fake_results):
+        with patch("subagent.agentic_search.call_search_api", return_value=fake_results):
             result2 = perform_web_search(state_iter2)
 
         assert result2["web_results"][0]["results"] == [], "duplicate URL should be filtered out in second iteration"
@@ -226,14 +236,14 @@ class TestFollowedUpQueriesDefault:
         """url_memo pre-seeded with one URL: that URL is filtered, new URL passes through."""
         state = {
             "queries": ["q1"],
-            "url_memo": {"http://seen.com"},
+            "url_memo": ["http://seen.com"],
             "curr_num_iterations": 1,
         }
         fake_results = [{"results": [
             {"url": "http://seen.com", "title": "old", "content": "c", "raw_content": "r"},
             {"url": "http://new.com",  "title": "new", "content": "c", "raw_content": "r"},
         ]}]
-        with patch("subagent.agentic_search.selenium_api_search", return_value=fake_results):
+        with patch("subagent.agentic_search.call_search_api", return_value=fake_results):
             result = perform_web_search(state)
 
         urls_in_results = [r["url"] for r in result["web_results"][0]["results"]]
@@ -241,6 +251,63 @@ class TestFollowedUpQueriesDefault:
         assert "http://new.com" in urls_in_results
         assert "http://seen.com" in result["url_memo"]
         assert "http://new.com" in result["url_memo"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #21 — WebResult / WebResultBatch TypedDict schema
+# ---------------------------------------------------------------------------
+class TestWebResultTypedDicts:
+    def test_importable(self):
+        """WebResult and WebResultBatch must be importable from State.agentic_search_state."""
+        from State.agentic_search_state import WebResult, WebResultBatch  # noqa: F401
+
+    def test_web_result_required_keys(self):
+        """WebResult must declare title, content, and url as required keys.
+
+        raw_content is intentionally NotRequired because it is absent between the
+        search step (perform_web_search) and the crawl step (crawl_filtered_results).
+        """
+        from State.agentic_search_state import WebResult
+        required = {"title", "content", "url"}
+        # __required_keys__ is set by TypedDict for non-NotRequired fields
+        assert required <= WebResult.__required_keys__, (
+            f"WebResult missing required keys: {required - WebResult.__required_keys__}"
+        )
+
+    def test_web_result_score_is_optional(self):
+        """score must be NotRequired so results without a score are valid."""
+        from State.agentic_search_state import WebResult
+        assert "score" in WebResult.__optional_keys__, "score must be NotRequired in WebResult"
+
+    def test_web_result_raw_content_is_optional(self):
+        """raw_content must be NotRequired — absent between search and crawl steps."""
+        from State.agentic_search_state import WebResult
+        assert "raw_content" in WebResult.__optional_keys__, "raw_content must be NotRequired in WebResult"
+
+    def test_web_result_batch_has_results_key(self):
+        """WebResultBatch must declare a 'results' key."""
+        from State.agentic_search_state import WebResultBatch
+        assert "results" in WebResultBatch.__required_keys__
+
+    def test_state_parallel_list_fields_use_web_result_batch(self):
+        """web_results, filtered_web_results, compressed_web_results must be list[WebResultBatch]."""
+        import ast
+        from .conftest import ROOT
+        source = (ROOT / "State" / "agentic_search_state.py").read_text()
+        tree = ast.parse(source)
+        # Collect annotated field names inside AgenticSearchState
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "AgenticSearchState":
+                for stmt in node.body:
+                    if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                        field = stmt.target.id
+                        if field in ("web_results", "filtered_web_results", "compressed_web_results"):
+                            annotation = ast.unparse(stmt.annotation)
+                            assert "WebResultBatch" in annotation, (
+                                f"{field} annotation should reference WebResultBatch, got: {annotation}"
+                            )
+                return
+        raise AssertionError("AgenticSearchState class not found in agentic_search_state.py")
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +427,48 @@ class TestScoreThresholdAndExceptionHandling:
         assert len(result["filtered_web_results"][0]["results"]) == 0
         # Second result still processes normally
         assert len(result["filtered_web_results"][1]["results"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Absent raw_content — LLM prompt must contain the correct marker
+# ---------------------------------------------------------------------------
+class TestFilterAbsentRawContent:
+    def test_document_contains_not_yet_fetched_when_raw_absent(self):
+        """When raw_content is absent, the LLM receives a '(Raw content not yet fetched)' marker."""
+        state = _filter_state([[{"url": "http://x.com", "title": "Title A", "content": "Snippet A"}]])
+        mock_response = MagicMock()
+        mock_response.tool_calls = [{"args": {"score": 4}}]
+
+        captured = {}
+
+        async def fake_llm(*args, prompt, **kwargs):
+            captured["prompt"] = prompt
+            return mock_response
+
+        with patch("subagent.agentic_search.call_llm_async", side_effect=fake_llm):
+            result = _run(filter_and_format_results(state))
+        assert len(result["filtered_web_results"][0]["results"]) == 1
+        # The document passed to the LLM must contain the "not yet fetched" marker
+        full_prompt = " ".join(msg.content for msg in captured["prompt"])
+        assert "not yet fetched" in full_prompt
+
+    def test_document_contains_raw_content_preview_when_present(self):
+        """When raw_content is present, the LLM receives the 500-char preview."""
+        state = _filter_state([[{"url": "http://y.com", "title": "Title B", "content": "Snippet B", "raw_content": "x" * 600}]])
+        mock_response = MagicMock()
+        mock_response.tool_calls = [{"args": {"score": 4}}]
+
+        captured = {}
+
+        async def fake_llm(*args, prompt, **kwargs):
+            captured["prompt"] = prompt
+            return mock_response
+
+        with patch("subagent.agentic_search.call_llm_async", side_effect=fake_llm):
+            result = _run(filter_and_format_results(state))
+        full_prompt = " ".join(msg.content for msg in captured["prompt"])
+        assert "Raw Content:" in full_prompt
+        assert "500 characters truncated" in full_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -491,6 +600,72 @@ class TestSynthesizeAnswer:
 
 
 # ---------------------------------------------------------------------------
+# source_registry building in aggregate_final_results
+# ---------------------------------------------------------------------------
+class TestAggregateRegistry:
+    """Unit tests for source_registry building in aggregate_final_results."""
+
+    def _make_compressed(self, results_per_query):
+        """Build compressed_web_results structure from list of lists of dicts."""
+        return [{"results": results} for results in results_per_query]
+
+    def test_builds_registry_from_results(self):
+        """Registry entries have correct title and url from compressed results."""
+        with patch("subagent.agentic_search.web_search_deduplicate_and_format_sources", return_value=""):
+            state = {
+                "compressed_web_results": self._make_compressed([[
+                    {"url": "http://a.com", "title": "Article A", "content": "", "raw_content": ""},
+                ]]),
+                "source_registry": [],
+                "queries": ["q"],
+            }
+            result = aggregate_final_results(state)
+        assert result["source_registry"] == [{"title": "Article A", "url": "http://a.com"}]
+
+    def test_within_iteration_dedup(self):
+        """Same URL from two queries in one round → only one registry entry."""
+        with patch("subagent.agentic_search.web_search_deduplicate_and_format_sources", return_value=""):
+            state = {
+                "compressed_web_results": self._make_compressed([
+                    [{"url": "http://dup.com", "title": "Dup", "content": "", "raw_content": ""}],
+                    [{"url": "http://dup.com", "title": "Dup", "content": "", "raw_content": ""}],
+                ]),
+                "source_registry": [],
+                "queries": ["q1", "q2"],
+            }
+            result = aggregate_final_results(state)
+        assert len(result["source_registry"]) == 1
+
+    def test_cross_iteration_dedup(self):
+        """URL already in registry (from a prior iteration) is not re-appended."""
+        with patch("subagent.agentic_search.web_search_deduplicate_and_format_sources", return_value=""):
+            state = {
+                "compressed_web_results": self._make_compressed([[
+                    {"url": "http://already.com", "title": "Old", "content": "", "raw_content": ""},
+                    {"url": "http://new.com", "title": "New", "content": "", "raw_content": ""},
+                ]]),
+                "source_registry": [{"title": "Old", "url": "http://already.com"}],
+                "queries": ["q"],
+            }
+            result = aggregate_final_results(state)
+        assert result["source_registry"] == [{"title": "New", "url": "http://new.com"}]
+
+    def test_non_http_urls_excluded(self):
+        """Non-http URLs (e.g., _part1 chunk keys) are not added to registry."""
+        with patch("subagent.agentic_search.web_search_deduplicate_and_format_sources", return_value=""):
+            state = {
+                "compressed_web_results": self._make_compressed([[
+                    {"url": "_part1_key", "title": "Chunk", "content": "", "raw_content": ""},
+                    {"url": "http://real.com", "title": "Real", "content": "", "raw_content": ""},
+                ]]),
+                "source_registry": [],
+                "queries": ["q"],
+            }
+            result = aggregate_final_results(state)
+        assert result["source_registry"] == [{"title": "Real", "url": "http://real.com"}]
+
+
+# ---------------------------------------------------------------------------
 # aggregate_final_results: materials reset each round
 # ---------------------------------------------------------------------------
 class TestAggregateFinalResultsMaterialsReset:
@@ -582,3 +757,376 @@ def test_compress_llm_called_for_long_content():
         asyncio.run(compress_raw_content(state))
     # LLM must have been called exactly once
     mock_llm.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _format_sources_section pure function
+# ---------------------------------------------------------------------------
+class TestFormatSourcesSection:
+    """Unit tests for _format_sources_section pure function."""
+
+    def _make_registry(self, *urls):
+        return [{"title": f"Title {i+1}", "url": url} for i, url in enumerate(urls)]
+
+    def test_renumbers_sparse_citations(self):
+        """[3][19] in text → renumbered [1][2]; Sources section uses new numbers."""
+        from subagent.agentic_search import _format_sources_section
+        registry = self._make_registry(
+            "http://a.com", "http://b.com", "http://c.com",
+            *[f"http://x{i}.com" for i in range(15)],  # 15 items → s.com is at index 18, citation [19]
+            "http://s.com",
+        )
+        answer = "Claim A [3]. Claim B [19]."
+        result = _format_sources_section(answer, registry)
+        assert "[1]" in result
+        assert "[2]" in result
+        assert "[3]" not in result.split("### Sources")[0]  # original [3] gone from body
+        assert "[19]" not in result
+        assert "http://c.com" in result
+        assert "http://s.com" in result
+
+    def test_no_citations_returns_original(self):
+        """Answer with no [N] references is returned unchanged."""
+        from subagent.agentic_search import _format_sources_section
+        registry = self._make_registry("http://a.com")
+        answer = "Answer with no citations."
+        assert _format_sources_section(answer, registry) == answer
+
+    def test_empty_registry_returns_original(self):
+        """Empty registry → original answer returned unchanged."""
+        from subagent.agentic_search import _format_sources_section
+        answer = "Claim [1]."
+        assert _format_sources_section(answer, []) == answer
+
+    def test_out_of_range_index_skipped(self):
+        """[N] beyond registry length → that entry skipped in Sources, no crash."""
+        from subagent.agentic_search import _format_sources_section
+        registry = self._make_registry("http://a.com")  # only index 1
+        answer = "Claim [1]. Claim [5]."
+        result = _format_sources_section(answer, registry)
+        assert "http://a.com" in result
+        assert "### Sources" in result
+        # [5] is out of range — should not appear in Sources
+        lines = result.split("\n")
+        source_lines = [l for l in lines if l.startswith("- [")]
+        assert len(source_lines) == 1
+
+    def test_sources_section_format(self):
+        """Sources section format: '- [N] Title — URL'."""
+        from subagent.agentic_search import _format_sources_section
+        registry = [{"title": "My Article", "url": "https://example.com/art"}]
+        answer = "See [1]."
+        result = _format_sources_section(answer, registry)
+        assert "- [1] My Article — https://example.com/art" in result
+
+    def test_empty_answer_returns_empty(self):
+        """Empty answer string returns unchanged."""
+        from subagent.agentic_search import _format_sources_section
+        assert _format_sources_section("", [{"title": "T", "url": "http://x.com"}]) == ""
+
+    def test_llm_written_sources_section_stripped_before_extraction(self):
+        """If LLM disobeys and writes its own ### Sources, those [N] must not
+        pollute the cited set — only body inline citations count."""
+        from subagent.agentic_search import _format_sources_section
+        registry = self._make_registry(
+            "http://a.com", "http://b.com", "http://c.com",
+            "http://d.com", "http://e.com",
+        )
+        # LLM body cites only [2][3]; LLM also wrote its own Sources with [1]-[5]
+        answer = (
+            "Body text citing [2] and [3].\n\n"
+            "### Sources\n"
+            "- [1] Title 1 — http://a.com\n"
+            "- [2] Title 2 — http://b.com\n"
+            "- [3] Title 3 — http://c.com\n"
+            "- [4] Title 4 — http://d.com\n"
+            "- [5] Title 5 — http://e.com\n"
+        )
+        result = _format_sources_section(answer, registry)
+        source_lines = [l for l in result.split("\n") if l.startswith("- [")]
+        # Only 2 sources should appear (the actually-cited [2] and [3])
+        assert len(source_lines) == 2, f"Expected 2 source lines, got {len(source_lines)}: {source_lines}"
+        # They should be renumbered [1] and [2]
+        assert any("- [1]" in l for l in source_lines)
+        assert any("- [2]" in l for l in source_lines)
+        assert not any("- [3]" in l for l in source_lines)
+        assert not any("- [4]" in l for l in source_lines)
+        assert not any("- [5]" in l for l in source_lines)
+
+
+# ---------------------------------------------------------------------------
+# finalize_answer node
+# ---------------------------------------------------------------------------
+class TestFinalizeAnswer:
+    """Unit tests for the finalize_answer node function."""
+
+    def test_finalize_answer_appends_sources_section(self):
+        """State with answer containing [1] citation and a one-entry registry
+        should produce output that contains '### Sources'."""
+        state = {
+            "answer": "Tesla's revenue is strong. [1]",
+            "source_registry": [{"title": "Reuters", "url": "http://reuters.com"}],
+        }
+        result = finalize_answer(state)
+        assert "### Sources" in result["answer"]
+
+    def test_finalize_answer_empty_answer_returns_empty(self):
+        """When answer is empty string, output answer must also be empty string."""
+        state = {
+            "answer": "",
+            "source_registry": [{"title": "Reuters", "url": "http://reuters.com"}],
+        }
+        result = finalize_answer(state)
+        assert result["answer"] == ""
+
+    def test_finalize_answer_empty_registry_returns_original(self):
+        """When registry is empty, the original answer is returned unchanged."""
+        original_answer = "Tesla revenue grew [1] significantly."
+        state = {
+            "answer": original_answer,
+            "source_registry": [],
+        }
+        result = finalize_answer(state)
+        assert result["answer"] == original_answer
+
+    def test_finalize_answer_missing_answer_key(self):
+        """State with no 'answer' key must not crash and must return answer=''."""
+        state = {
+            "source_registry": [{"title": "Reuters", "url": "http://reuters.com"}],
+        }
+        result = finalize_answer(state)
+        assert result["answer"] == ""
+
+
+# ---------------------------------------------------------------------------
+# _grade_section_content fallback behaviour
+# ---------------------------------------------------------------------------
+class TestGradeSectionContentFallback:
+    """Unit tests for _grade_section_content in report_writer.py.
+
+    Each test patches report_writer._call_llm_with_retry directly so that
+    no real LLM calls are made and no network connectivity is required.
+    """
+
+    def _make_section(self):
+        """Return a minimal Section object for testing."""
+        from State.state import Section
+
+        return Section(
+            name="Test Section",
+            description="A section about test topics.",
+            content="Sample section content.",
+            research=True,
+        )
+
+    def _make_state(self):
+        """Return a minimal SectionState dict for testing."""
+        return {
+            "search_iterations": 0,
+            "question_history": [],
+        }
+
+    def test_empty_tool_calls_routes_to_generate_question(self):
+        """When feedback has empty tool_calls list, grade defaults to 'fail'
+        so the Command routes to 'generate_question'."""
+        from report_writer import _grade_section_content
+
+        mock_feedback = MagicMock()
+        mock_feedback.tool_calls = []  # empty → feedback_data = {} → grade defaults to "fail"
+
+        with patch("report_writer._call_llm_with_retry", return_value=mock_feedback):
+            cmd = _grade_section_content(self._make_section(), self._make_state())
+
+        assert cmd.goto == "generate_question"
+
+    def test_missing_grade_key_defaults_to_fail(self):
+        """When tool_calls[0]['args'] has no 'grade' key, grade defaults to
+        'fail' and the Command routes to 'generate_question'."""
+        from report_writer import _grade_section_content
+
+        mock_feedback = MagicMock()
+        mock_feedback.tool_calls = [{"args": {"weakness": "missing data gap"}}]
+
+        with patch("report_writer._call_llm_with_retry", return_value=mock_feedback):
+            cmd = _grade_section_content(self._make_section(), self._make_state())
+
+        assert cmd.goto == "generate_question"
+
+    def test_missing_weakness_key_defaults_to_empty(self):
+        """When tool_calls[0]['args'] has grade='pass' but no 'weakness' key,
+        weakness defaults to '' and the Command routes to END (pass path)."""
+        from report_writer import _grade_section_content
+
+        mock_feedback = MagicMock()
+        mock_feedback.tool_calls = [{"args": {"grade": "pass"}}]
+
+        with patch("report_writer._call_llm_with_retry", return_value=mock_feedback):
+            cmd = _grade_section_content(self._make_section(), self._make_state())
+
+        assert cmd.goto == END
+
+
+# ---------------------------------------------------------------------------
+# chunk_large_articles node
+# ---------------------------------------------------------------------------
+class TestChunkLargeArticles:
+    """Tests for chunk_large_articles node."""
+
+    def _state(self, results_per_query: list[list[dict]]) -> dict:
+        return {
+            "queries": [f"q{i}" for i in range(len(results_per_query))],
+            "followed_up_queries": [],
+            "filtered_web_results": [{"results": items} for items in results_per_query],
+        }
+
+    def test_short_article_passes_through_unchanged(self):
+        """Articles with raw_content shorter than threshold pass through unchanged."""
+        from subagent.agentic_search import chunk_large_articles
+
+        result_in = {"url": "http://x.com", "title": "T", "content": "C", "raw_content": "short"}
+        state = self._state([[result_in]])
+
+        with patch("subagent.agentic_search.get_embedding_model"):
+            out = chunk_large_articles(state)
+
+        results = out["filtered_web_results"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["raw_content"] == "short"
+
+    def test_long_article_replaced_by_chunks(self):
+        """Article with raw_content >= threshold is replaced by a single concatenated entry."""
+        from subagent.agentic_search import chunk_large_articles
+
+        long_raw = "word " * 1500  # > 5000 chars
+        result_in = {"url": "http://x.com", "title": "T", "content": "C", "raw_content": long_raw}
+        state = self._state([[result_in]])
+
+        fake_doc = MagicMock()
+        fake_doc.page_content = "relevant chunk"
+        mock_vs = MagicMock()
+        mock_vs.similarity_search.return_value = [fake_doc, fake_doc]
+
+        with (
+            patch("subagent.agentic_search.get_embedding_model"),
+            patch("subagent.agentic_search.Chroma.from_documents", return_value=mock_vs),
+        ):
+            out = chunk_large_articles(state)
+
+        results = out["filtered_web_results"][0]["results"]
+        # Chunks joined into one entry — URL unchanged, no deduplication risk
+        assert len(results) == 1
+        raw = results[0]["raw_content"]
+        assert raw.startswith("[RAG Retrieved Chunks]")
+        assert "Chunk 1:\nrelevant chunk" in raw
+        assert "Chunk 2:\nrelevant chunk" in raw
+        assert results[0]["url"] == "http://x.com"
+        assert results[0]["title"] == "T"
+        # Collection must be explicitly released after each article
+        mock_vs.delete_collection.assert_called_once()
+
+    def test_fallback_on_chroma_error_truncates_to_threshold(self):
+        """When Chroma raises, fallback truncates raw_content to _CHUNK_THRESHOLD chars."""
+        from subagent.agentic_search import _CHUNK_THRESHOLD, chunk_large_articles
+
+        long_raw = "x" * 20000
+        result_in = {"url": "http://x.com", "title": "T", "content": "C", "raw_content": long_raw}
+        state = self._state([[result_in]])
+
+        with (
+            patch("subagent.agentic_search.get_embedding_model"),
+            patch("subagent.agentic_search.Chroma.from_documents", side_effect=RuntimeError("OOM")),
+        ):
+            out = chunk_large_articles(state)
+
+        results = out["filtered_web_results"][0]["results"]
+        assert len(results) == 1
+        assert len(results[0]["raw_content"]) == _CHUNK_THRESHOLD
+
+    def test_none_raw_content_passes_through(self):
+        """Result with raw_content=None passes through unchanged without crashing."""
+        from subagent.agentic_search import chunk_large_articles
+
+        result_in = {"url": "http://x.com", "title": "T", "content": "C", "raw_content": None}
+        state = self._state([[result_in]])
+
+        with patch("subagent.agentic_search.get_embedding_model"):
+            out = chunk_large_articles(state)
+
+        results = out["filtered_web_results"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["raw_content"] is None
+
+    def test_followed_up_queries_used_as_search_context(self):
+        """When followed_up_queries is non-empty, it is used instead of queries for similarity_search."""
+        from subagent.agentic_search import chunk_large_articles
+
+        long_raw = "word " * 1500
+        state = {
+            "queries": ["original query"],
+            "followed_up_queries": ["follow up query"],
+            "filtered_web_results": [{"results": [
+                {"url": "http://x.com", "title": "T", "content": "C", "raw_content": long_raw}
+            ]}],
+        }
+
+        fake_doc = MagicMock()
+        fake_doc.page_content = "chunk"
+        mock_vs = MagicMock()
+        mock_vs.similarity_search.return_value = [fake_doc]
+
+        with (
+            patch("subagent.agentic_search.get_embedding_model"),
+            patch("subagent.agentic_search.Chroma.from_documents", return_value=mock_vs),
+        ):
+            chunk_large_articles(state)
+
+        # similarity_search called with the follow-up query, not original
+        mock_vs.similarity_search.assert_called_once_with("follow up query", k=5)
+        mock_vs.delete_collection.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# crawl_filtered_results node
+# ---------------------------------------------------------------------------
+class TestCrawlFilteredResults:
+    def test_merges_raw_content_into_filtered_results(self):
+        """crawl_filtered_results must call call_crawl_api and merge raw_content back."""
+        state = {
+            "filtered_web_results": [
+                {"results": [
+                    {"url": "http://a.com", "title": "A", "content": "snippet a"},
+                    {"url": "http://b.com", "title": "B", "content": "snippet b"},
+                ]}
+            ]
+        }
+        fake_crawl = {"http://a.com": "raw a content", "http://b.com": None}
+
+        with patch("subagent.agentic_search.call_crawl_api", return_value=fake_crawl):
+            result = crawl_filtered_results(state)
+
+        updated = result["filtered_web_results"][0]["results"]
+        assert updated[0]["raw_content"] == "raw a content"
+        assert updated[1]["raw_content"] is None
+
+    def test_collects_unique_urls_only(self):
+        """Each URL is passed to call_crawl_api exactly once even if it appears in multiple query batches."""
+        state = {
+            "filtered_web_results": [
+                {"results": [{"url": "http://dup.com", "title": "D", "content": "c"}]},
+                {"results": [{"url": "http://dup.com", "title": "D", "content": "c"}]},
+            ]
+        }
+        with patch("subagent.agentic_search.call_crawl_api", return_value={"http://dup.com": "raw"}) as mock_crawl:
+            crawl_filtered_results(state)
+
+        called_urls = mock_crawl.call_args[0][0]
+        assert called_urls.count("http://dup.com") == 1
+
+    def test_empty_filtered_results(self):
+        """No crash and call_crawl_api is called with empty list when no results."""
+        state = {"filtered_web_results": [{"results": []}]}
+        with patch("subagent.agentic_search.call_crawl_api", return_value={}) as mock_crawl:
+            result = crawl_filtered_results(state)
+
+        mock_crawl.assert_called_once_with([])
+        assert result["filtered_web_results"] == [{"results": []}]

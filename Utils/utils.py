@@ -3,28 +3,26 @@ import logging
 import math
 import os
 import time
-from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
+import omegaconf
 import requests
-from langchain_classic.retrievers import EnsembleRetriever
-from langchain_community.retrievers import BM25Retriever
-from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnableLambda
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_litellm import ChatLiteLLM
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from requests.adapters import HTTPAdapter
 from requests.exceptions import ConnectionError, RequestException, Timeout
 from tavily import TavilyClient
 from urllib3.util.retry import Retry
 
 from State.state import Section
+from langfuse import observe
+from Utils.langfuse_tracing import get_langfuse_callback
 
-host = os.environ.get("SEARCH_HOST", None)
-port = os.environ.get("SEARCH_PORT", None)
-temp_files_path = os.environ.get("TEMP_DIR", "./temp")
-os.makedirs(temp_files_path, exist_ok=True)
+_cfg = omegaconf.OmegaConf.load(Path(__file__).parent.parent / "report_config.yaml")
+_MAX_TOKENS: int = int(_cfg.get("MAX_TOKENS", 65536))
+
 tavily_client = TavilyClient()
 
 
@@ -44,6 +42,15 @@ def create_http_session():
 
 
 http_session = create_http_session()
+
+# Timeout and retry constants for the decoupled /search and /crawl endpoints
+_MAX_RETRIES = 3
+_SEARCH_MAX_RESULTS = 10
+_SEARCH_SERVICE_TIMEOUT = 30   # passed as ?timeout= to GET /search
+_SEARCH_HTTP_TIMEOUT = 45      # requests client timeout for GET /search
+
+_CRAWL_SERVICE_TIMEOUT = 60    # passed as "timeout" in POST /crawl body (per-URL)
+_CRAWL_HTTP_TIMEOUT = 180      # requests client timeout for POST /crawl (server crawls in parallel)
 
 logger = logging.getLogger("Utils")
 logger.setLevel(logging.ERROR)
@@ -66,6 +73,7 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     primary = ChatLiteLLM(
         model=model_name,
         temperature=temperature,
+        max_tokens=_MAX_TOKENS,
     )
 
     if tool:
@@ -74,8 +82,13 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     def _validate_tool_calls(msg):
         if tool and tool_choice == "required" and not getattr(msg, "tool_calls", None):
             raise ValueError("Required tool call missing")
-        if not (getattr(msg, "content", None) or getattr(msg, "tool_calls", None)):
+        content = getattr(msg, "content", None)
+        effective_content = content.strip() if isinstance(content, str) else content
+        if not (effective_content or getattr(msg, "tool_calls", None)):
             raise ValueError("Empty model output")
+        finish_reason = (getattr(msg, "response_metadata", None) or {}).get("finish_reason")
+        if finish_reason in ("length", "max_tokens"):
+            raise ValueError("Output truncated by token limit")
         return msg
 
     validated_primary = primary | RunnableLambda(_validate_tool_calls)
@@ -83,13 +96,16 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     backup = ChatLiteLLM(
         model=backup_model_name,
         temperature=backup_temperature,
+        max_tokens=_MAX_TOKENS,
     )
     if tool:
         backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
 
     model = validated_primary.with_fallbacks([backup])
 
-    return model.invoke(prompt)
+    handler = get_langfuse_callback()
+    callbacks = [handler] if handler else []
+    return model.invoke(prompt, config={"callbacks": callbacks})
 
 
 async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, tool=None, tool_choice=None):
@@ -99,6 +115,7 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     primary = ChatLiteLLM(
         model=model_name,
         temperature=temperature,
+        max_tokens=_MAX_TOKENS,
     )
 
     if tool:
@@ -107,8 +124,13 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     def _validate_tool_calls(msg):
         if tool and tool_choice == "required" and not getattr(msg, "tool_calls", None):
             raise ValueError("Required tool call missing")
-        if not (getattr(msg, "content", None) or getattr(msg, "tool_calls", None)):
+        content = getattr(msg, "content", None)
+        effective_content = content.strip() if isinstance(content, str) else content
+        if not (effective_content or getattr(msg, "tool_calls", None)):
             raise ValueError("Empty model output")
+        finish_reason = (getattr(msg, "response_metadata", None) or {}).get("finish_reason")
+        if finish_reason in ("length", "max_tokens"):
+            raise ValueError("Output truncated by token limit")
         return msg
 
     validated_primary = primary | RunnableLambda(_validate_tool_calls)
@@ -116,12 +138,15 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     backup = ChatLiteLLM(
         model=backup_model_name,
         temperature=backup_temperature,
+        max_tokens=_MAX_TOKENS,
     )
     if tool:
         backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
 
     model = validated_primary.with_fallbacks([backup])
-    return await model.ainvoke(prompt)
+    handler = get_langfuse_callback()
+    callbacks = [handler] if handler else []
+    return await model.ainvoke(prompt, config={"callbacks": callbacks})
 
 
 def track_expanded_context(
@@ -147,72 +172,6 @@ def track_expanded_context(
     else:
         logger.critical("Can not find critical content")
         return None
-
-
-class ContentExtractor:
-    def __init__(self, temp_dir=temp_files_path, k=3):
-        self.k = k
-        self.temp_dir = temp_dir
-        # BAAI/bge-m3
-        embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
-        self.docs = [Document("None", metadata={"path": "None", "content": "None"})]
-        self.vectorstore = Chroma.from_documents(
-            documents=self.docs,
-            collection_name="temp_data",
-            embedding=embeddings,
-        )
-        self.bm25_retriever = BM25Retriever.from_documents(self.docs)
-        self.bm25_retriever.k = self.k
-        self.hybrid_retriever = EnsembleRetriever(
-            retrievers=[
-                self.vectorstore.as_retriever(search_kwargs={"k": self.k}),
-                self.bm25_retriever,
-            ],
-            weights=[0.8, 0.2],
-        )
-
-    def update_new_docs(self, files):
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=300,
-            chunk_overlap=50,
-            separators=["\n\n\n\n", "\n\n\n", "\n\n", "\n", ""],
-        )
-        new_docs = []
-        for file in files:
-            with open(file) as f:
-                texts = f.read()
-            name = file.split("/")[-1].replace(".txt", "")
-            new_docs.append(Document(texts, metadata={"path": name, "content": texts}))
-        new_docs = text_splitter.split_documents(new_docs)
-        return new_docs
-
-    def update(self, files):
-        new_docs = self.update_new_docs(files)
-        self.vectorstore.add_documents(new_docs)
-        self.docs.extend(new_docs)
-
-        self.bm25_retriever = BM25Retriever.from_documents(self.docs)
-        self.bm25_retriever.k = self.k
-        self.hybrid_retriever = EnsembleRetriever(
-            retrievers=[
-                self.vectorstore.as_retriever(search_kwargs={"k": self.k}),
-                self.bm25_retriever,
-            ],
-            weights=[0.8, 0.2],
-        )
-
-    def query(self, q):
-        seen, info = set(), []
-        results = self.hybrid_retriever.invoke(q)
-        for res in results:
-            if res.page_content in seen:
-                continue
-            seen.add(res.page_content)
-            expanded_content = track_expanded_context(res.metadata["content"], res.page_content, 1500, 1000)
-            return_res = deepcopy(res)
-            return_res.metadata["content"] = expanded_content
-            info.append(return_res)
-        return info
 
 
 def format_human_feedback(feedbacks: list[str]) -> str:
@@ -305,113 +264,177 @@ def tavily_search(search_queries, include_raw_content: bool):
     return search_docs
 
 
-content_extractor = ContentExtractor()
+def _collect_unique_urls(batches: list[dict]) -> list[str]:
+    """Return ordered list of unique URLs from a list of {"results": [...]} batch dicts."""
+    seen: set[str] = set()
+    urls: list[str] = []
+    for batch in batches:
+        for result in batch.get("results", []):
+            url = result.get("url") or ""
+            if url and url not in seen:
+                urls.append(url)
+                seen.add(url)
+    return urls
 
 
-def selenium_api_search(search_queries, include_raw_content: bool):
-    memo = set()
-    search_docs = []
+def _search_one(
+    base_url: str,
+    query: str,
+    time_filter: str,
+    gl: str,
+    hl: str,
+    max_results: int = _SEARCH_MAX_RESULTS,
+) -> dict:
+    """GET /search for a single query. Returns {"results": [...]} or {"results": []} on failure."""
+    params = {
+        "query": query,
+        "max_results": max_results,
+        "timeout": _SEARCH_SERVICE_TIMEOUT,
+        "gl": gl,
+        "hl": hl,
+    }
+    if time_filter != "all":
+        params["time_filter"] = time_filter
 
-    # Check if host and port are configured
+    for attempt in range(_MAX_RETRIES):
+        try:
+            logger.info(f"GET /search query='{query}' attempt {attempt + 1}")
+            response = http_session.get(
+                f"{base_url}/search", params=params, timeout=_SEARCH_HTTP_TIMEOUT
+            )
+            response.raise_for_status()
+            try:
+                return response.json()
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse /search JSON for '{query}': {e}")
+                if attempt == _MAX_RETRIES - 1:
+                    return {"results": []}
+                continue
+        except Timeout:
+            logger.warning(f"/search timeout for '{query}' attempt {attempt + 1}")
+            if attempt == _MAX_RETRIES - 1:
+                logger.error(f"Max retries exceeded for /search '{query}' (timeout)")
+                return {"results": []}
+        except ConnectionError:
+            logger.warning(f"/search connection error for '{query}' attempt {attempt + 1}")
+            if attempt == _MAX_RETRIES - 1:
+                logger.error(f"Max retries exceeded for /search '{query}' (connection error)")
+                return {"results": []}
+        except RequestException as e:
+            logger.error(f"/search request error for '{query}': {e}")
+            if attempt == _MAX_RETRIES - 1:
+                return {"results": []}
+        time.sleep(2 ** attempt)
+    return {"results": []}  # unreachable with _MAX_RETRIES > 0; guards against future refactors
+
+
+@observe(name="call_search_api")
+def call_search_api(
+    search_queries: list[str],
+    time_filter: str = "month",
+    gl: str = "tw",
+    hl: str = "zh-tw",
+    max_results: int = _SEARCH_MAX_RESULTS,
+) -> list[dict]:
+    """Call GET /search for each query.
+
+    Returns list[{"results": [{"title", "url", "content"}]}].
+    Results do NOT contain raw_content — call call_crawl_api separately if needed.
+    """
+    host = os.environ.get("SEARCH_HOST")
+    port = os.environ.get("SEARCH_PORT")
     if not host or not port:
         logger.error("SEARCH_HOST and SEARCH_PORT environment variables are required")
+        return [{"results": []} for _ in search_queries]
+
+    base_url = f"http://{host}:{port}"
+    results: list[dict] = [{}] * len(search_queries)
+    with ThreadPoolExecutor(max_workers=len(search_queries)) as pool:
+        futures = {
+            pool.submit(_search_one, base_url, q, time_filter=time_filter, gl=gl, hl=hl, max_results=max_results): i
+            for i, q in enumerate(search_queries)
+        }
+        for fut in as_completed(futures):
+            results[futures[fut]] = fut.result()
+    return results
+
+
+@observe(name="call_crawl_api")
+def call_crawl_api(urls: list[str], crawl_timeout: int = _CRAWL_SERVICE_TIMEOUT) -> dict[str, str | None]:
+    """POST /crawl for a batch of URLs (crawled in parallel on the server).
+
+    Returns {url: raw_content} mapping. raw_content is None on crawl failure or bot detection.
+    """
+    if not urls:
+        return {}
+
+    host = os.environ.get("SEARCH_HOST")
+    port = os.environ.get("SEARCH_PORT")
+    if not host or not port:
+        logger.error("SEARCH_HOST and SEARCH_PORT environment variables are required")
+        return {u: None for u in urls}
+
+    base_url = f"http://{host}:{port}"
+    fallback: dict[str, str | None] = {u: None for u in urls}
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            logger.info(f"POST /crawl {len(urls)} URLs attempt {attempt + 1}")
+            response = http_session.post(
+                f"{base_url}/crawl",
+                json={"urls": urls, "timeout": crawl_timeout},
+                timeout=_CRAWL_HTTP_TIMEOUT,
+            )
+            response.raise_for_status()
+            try:
+                data = response.json()
+                return {r["url"]: r.get("raw_content") for r in data.get("results", [])}
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse /crawl JSON: {e}")
+                if attempt == _MAX_RETRIES - 1:
+                    return fallback
+                continue
+        except Timeout:
+            logger.warning(f"/crawl timeout attempt {attempt + 1}")
+            if attempt == _MAX_RETRIES - 1:
+                logger.error("Max retries exceeded for /crawl (timeout)")
+                return fallback
+        except ConnectionError:
+            logger.warning(f"/crawl connection error attempt {attempt + 1}")
+            if attempt == _MAX_RETRIES - 1:
+                logger.error("Max retries exceeded for /crawl (connection error)")
+                return fallback
+        except RequestException as e:
+            logger.error(f"/crawl request error: {e}")
+            if attempt == _MAX_RETRIES - 1:
+                return fallback
+        time.sleep(2 ** attempt)
+    return fallback  # unreachable with _MAX_RETRIES > 0; guards against future refactors
+
+
+def call_search_engine(
+    search_queries,
+    include_raw_content: bool,
+    time_filter: str = "month",
+    gl: str = "tw",
+    hl: str = "zh-tw",
+) -> list[dict]:
+    """Deprecated: use call_search_api + call_crawl_api separately.
+
+    Kept as a backward-compat wrapper for callers that have not yet been migrated.
+    """
+    search_docs = call_search_api(search_queries, time_filter=time_filter, gl=gl, hl=hl)
+
+    if not include_raw_content:
         return search_docs
 
-    for query in search_queries:
-        max_retries = 3
-        retry_delay = 1
+    raw_content_map = call_crawl_api(_collect_unique_urls(search_docs))
 
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"Searching query: {query}, attempt {attempt + 1}")
+    for batch in search_docs:
+        for result in batch.get("results", []):
+            result["title"] = result.get("title", "").replace("/", "_")  # backward-compat: normalise slash in titles
+            result["raw_content"] = raw_content_map.get(result.get("url") or "")
 
-                output = http_session.get(
-                    f"http://{host}:{port}/search_and_crawl",
-                    params={
-                        "query": query,
-                        "include_raw_content": include_raw_content,
-                        "max_results": 5,
-                        "timeout": 600,
-                    },
-                    timeout=600,  # Give slightly more time than the service timeout
-                )
-                output.raise_for_status()  # Raise exception for HTTP errors
-
-                try:
-                    output_data = output.json()
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse JSON response for query '{query}': {e}")
-                    if attempt == max_retries - 1:
-                        # Add empty result on final attempt
-                        search_docs.append({"results": []})
-                    continue
-
-                break  # Success, exit retry loop
-
-            except Timeout as e:
-                logger.warning(f"Timeout for query '{query}' on attempt {attempt + 1}: {e}")
-                if attempt == max_retries - 1:
-                    logger.error(f"Max retries exceeded for query '{query}' due to timeout")
-                    search_docs.append({"results": []})
-                    continue
-                time.sleep(retry_delay * (2**attempt))  # Exponential backoff
-
-            except ConnectionError as e:
-                logger.warning(f"Connection error for query '{query}' on attempt {attempt + 1}: {e}")
-                if attempt == max_retries - 1:
-                    logger.error(f"Max retries exceeded for query '{query}' due to connection error")
-                    search_docs.append({"results": []})
-                    continue
-                time.sleep(retry_delay * (2**attempt))
-
-            except RequestException as e:
-                logger.error(f"Request failed for query '{query}': {e}")
-                if attempt == max_retries - 1:
-                    search_docs.append({"results": []})
-                    continue
-                time.sleep(retry_delay * (2**attempt))
-
-        else:
-            # If we reach here, the loop completed without breaking (all retries failed)
-            continue
-
-        # Process successful response
-        if include_raw_content:
-            large_files = []
-            for result in output_data.get("results", []):
-                result["title"] = result["title"].replace("/", "_")
-                if result.get("raw_content", "") is None:
-                    continue
-                try:
-                    if len(result.get("raw_content", "")) >= 70000:
-                        result["raw_content"] = result["raw_content"][:20000]
-
-                    if len(result.get("raw_content", "")) >= 5000:
-                        file_path = f"{temp_files_path}/{result['title']}.txt"
-                        with open(file_path, "w", encoding="utf-8") as f:
-                            f.write(result["raw_content"])
-                        large_files.append(file_path)
-                        result["raw_content"] = ""
-                except OSError as e:
-                    logger.error(f"Failed to write file for result '{result['title']}': {e}")
-                except Exception as e:
-                    logger.error(f"Unexpected error processing result '{result['title']}': {e}")
-
-            if len(large_files) > 0:
-                content_extractor.update(large_files)
-                search_results = content_extractor.query(query)
-                for idx, results in enumerate(search_results):
-                    if results.metadata["content"] not in memo:
-                        memo.add(results.metadata["content"])
-                        output_data["results"].append(
-                            {
-                                "url": f"{results.metadata['path']}_part{idx}",
-                                "title": results.metadata["path"],
-                                "content": "Raw content part has the most relevant information.",
-                                "raw_content": results.metadata["content"],
-                            }
-                        )
-        search_docs.append(output_data)
     return search_docs
 
 
@@ -432,7 +455,8 @@ def web_search_deduplicate_and_format_sources(search_response, include_raw_conte
     formatted_text = "Sources:\n\n"
     for _i, source in enumerate(unique_sources.values(), 1):
         formatted_text += f"Source {source['title']}:\n===\n"
-        formatted_text += f"URL: {source['url']}\n===\n"
+        url = source['url']
+        formatted_text += f"URL: {url if url.startswith('http') else '[content excerpt]'}\n===\n"
         formatted_text += f"Most relevant content from source: {source['content']}\n===\n"
         if include_raw_content:
             raw_content = source.get("raw_content", "")

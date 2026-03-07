@@ -15,7 +15,7 @@ A modular and automated research report generation tool designed for **in-depth 
     - **Agentic Search (`subagent/agentic_search.py`)**: A standalone, agent-driven deep search module that dynamically generates follow-up questions for multi-step information exploration.
 - 👤 **Human-in-the-Loop**: Supports user feedback to regenerate or revise the report plan.
 - 📑 **Parallel Processing**: Capable of generating multiple report sections simultaneously for efficient execution.
-- 🕸️ **Enhanced Web Scraping**: Uses `Selenium` for web content fetching, effectively handling dynamically loaded pages.
+- 🕸️ **Enhanced Web Scraping**: Delegates web search and crawling to an external Selenium-based service (not bundled), configured via `SEARCH_HOST` and `SEARCH_PORT` env vars.
 - 📄 **Advanced Information Preprocessing**: Includes powerful PDF and audio processing engines to convert unstructured data into RAG-friendly formats.
 
 ---

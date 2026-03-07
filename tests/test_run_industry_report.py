@@ -102,7 +102,7 @@ async def test_industry_report_end_to_end():
         # Token counting — always return a small number
         "report_writer.get_num_tokens": lambda *a, **kw: 100,
         # Web search used in _perform_planner_search
-        "report_writer.selenium_api_search": lambda *a, **kw: [],
+        "report_writer.call_search_api": lambda *a, **kw: [],
         "report_writer.web_search_deduplicate_and_format_sources": lambda *a, **kw: "mock web results",
         # Agentic search subgraph used in orchestration
         "report_writer.agentic_search_graph": MagicMock(
@@ -128,12 +128,15 @@ async def test_industry_report_end_to_end():
                     "use_web": True,
                     "use_local_db": False,
                     "max_search_depth": 1,
+                    "agentic_search_iterations": 1,
+                    "agentic_search_queries": 3,
+                    "refine_iteration": 0,
                     "report_structure": "default",
                     "recursion_limit": 100,
                 }
             }
 
-            input_data = ReportStateInput(topic="Test topic", refine_iteration=0)
+            input_data = ReportStateInput(topic="Test topic")
 
             # Phase 1: run until human_feedback interrupt
             interrupted = False

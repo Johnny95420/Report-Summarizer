@@ -32,7 +32,7 @@ DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
 from Prompt.industry_prompt import (
     content_refinement_instructions,
     final_section_writer_instructions,
-    query_writer_instructions,
+    section_question_instructions,
     refine_section_instructions,
     report_planner_instructions,
     report_planner_query_writer_instructions,
@@ -72,13 +72,14 @@ from Tools.tools import (
 from Utils.utils import (
     call_llm,
     call_llm_async,
+    call_search_api,
     format_human_feedback,
     format_search_results_with_metadata,
     format_sections,
-    selenium_api_search,
     track_expanded_context,
     web_search_deduplicate_and_format_sources,
 )
+from Utils.langfuse_tracing import langfuse_node
 
 logger = logging.getLogger("AgentLogger")
 logger.setLevel(logging.INFO)
@@ -190,11 +191,12 @@ def generate_report_plan(state: ReportState, config: RunnableConfig):
     feedback = state.get("feedback_on_report_plan", None)
     configurable = config["configurable"]
 
-    query_list = _generate_planner_queries(topic, feedback, configurable)
-    source_str = _perform_planner_search(query_list, configurable)
+    query_list, time_filter, gl, hl = _generate_planner_queries(topic, feedback, configurable)
+    source_str = _perform_planner_search(query_list, time_filter, configurable, gl=gl, hl=hl)
     sections = _generate_report_sections(topic, source_str, feedback, configurable)
 
-    return {"sections": sections, "curr_refine_iteration": 0}
+    refine_iteration = configurable.get("refine_iteration", 1)
+    return {"sections": sections, "curr_refine_iteration": 0, "refine_iteration": refine_iteration}
 
 
 def _generate_planner_queries(topic: str, feedback: str | None, configurable: dict) -> list[str]:
@@ -224,10 +226,13 @@ def _generate_planner_queries(topic: str, feedback: str | None, configurable: di
         tool_choice="required",
     )
     logger.info("===End report planner query generation.===")
-    return results.tool_calls[0]["args"]["queries"]
+    args = results.tool_calls[0]["args"]
+    return args["queries"], args.get("time_filter", "month"), args.get("gl", "tw"), args.get("hl", "zh-tw")
 
 
-def _perform_planner_search(queries: list[str], configurable: dict) -> str:
+def _perform_planner_search(
+    queries: list[str], time_filter: str, configurable: dict, gl: str = "tw", hl: str = "zh-tw"
+) -> str:
     """Execute search and return formatted results."""
     use_web = configurable.get("use_web", False)
     use_local_db = configurable.get("use_local_db", False)
@@ -243,7 +248,7 @@ def _perform_planner_search(queries: list[str], configurable: dict) -> str:
         source_str = format_search_results_with_metadata(results)
 
     if use_web:
-        web_results = selenium_api_search(queries, False)
+        web_results = call_search_api(queries, time_filter=time_filter, gl=gl, hl=hl)
         source_str2 = web_search_deduplicate_and_format_sources(web_results, False)
         source_str = source_str + "===\n\n" + source_str2
 
@@ -340,24 +345,32 @@ def generate_question(state: SectionState, config: RunnableConfig):
     weakness = state.get("weakness", "")
     question_history = state.get("question_history", [])
 
-    system_instruction = query_writer_instructions.format(
+    system_instruction = section_question_instructions.format(
         topic=section.description,
         weakness=weakness,
         question_history=_format_question_history(question_history),
     )
 
+    base_prompt = [SystemMessage(content=system_instruction)] + [
+        HumanMessage(content="Generate a structured research question for this section.")
+    ]
+
     logger.info(f"== Start generate question for topic: {section.name} ==")
-    result = call_llm(
-        MODEL_NAME,
-        BACKUP_MODEL_NAME,
-        prompt=[SystemMessage(content=system_instruction)]
-        + [HumanMessage(content="Generate a structured research question for this section.")],
-        tool=[question_formatter],
-        tool_choice="required",
-    )
+    result = call_llm(MODEL_NAME, BACKUP_MODEL_NAME, prompt=base_prompt, tool=[question_formatter], tool_choice="required")
     logger.info(f"== End generate question for topic: {section.name} ==")
 
-    question_text = result.tool_calls[0]["args"]["question"]
+    if not result.tool_calls:
+        logger.warning(f"generate_question: empty tool_calls for '{section.name}', retrying with reminder")
+        result = call_llm(
+            MODEL_NAME,
+            BACKUP_MODEL_NAME,
+            prompt=base_prompt + [result, HumanMessage(content="You must call the question_formatter tool to submit your answer.")],
+            tool=[question_formatter],
+            tool_choice="required",
+        )
+
+    args = result.tool_calls[0]["args"] if result.tool_calls else {}
+    question_text = args.get("question", "") or section.description
     current_question = Question(question=question_text)
     return {
         "current_question": current_question,
@@ -389,8 +402,14 @@ async def orchestration(state: SectionState, config: RunnableConfig):
         new_source_block += local_str
 
     if use_web:
+        agentic_search_iterations = configurable.get("agentic_search_iterations", 1)
+        agentic_search_queries = configurable.get("agentic_search_queries", 3)
         search_results = await agentic_search_graph.ainvoke({
             "question": current_question.question,
+            "max_num_iterations": agentic_search_iterations,
+            "num_queries": agentic_search_queries,
+            "url_memo": [],
+            "source_registry": [],
         })
         answer = search_results.get("answer", "")
         web_block = (
@@ -521,13 +540,14 @@ def _grade_section_content(section: Section, state: SectionState) -> Command[Lit
         tool_choice="required",
     )
 
-    feedback_data = feedback.tool_calls[0]["args"]
+    feedback_data = feedback.tool_calls[0]["args"] if feedback.tool_calls else {}
+    grade = feedback_data.get("grade", "fail")
+    weakness = feedback_data.get("weakness", "")
 
-    if feedback_data["grade"] == "pass":
+    if grade == "pass":
         logger.info(f"Section:{section.name} pass model check.")
         return Command(update={"completed_sections": [section]}, goto=END)
     else:
-        weakness = feedback_data["weakness"]
         logger.info(f"Section:{section.name} fail model check. Weakness: {weakness[:100]}...")
         return Command(
             update={"weakness": weakness, "section": section},
@@ -752,9 +772,9 @@ class ReportGraphBuilder:
     def _build_section_graph(self) -> StateGraph:
         """Build the section subgraph (shared by sync/async)."""
         section_builder = StateGraph(SectionState, output_schema=SectionOutputState)
-        section_builder.add_node("generate_question", generate_question)
-        section_builder.add_node("orchestration", orchestration)
-        section_builder.add_node("write_section", write_section)
+        section_builder.add_node("generate_question", langfuse_node(generate_question))
+        section_builder.add_node("orchestration",     langfuse_node(orchestration))
+        section_builder.add_node("write_section",     langfuse_node(write_section))
 
         section_builder.add_edge(START, "generate_question")
         section_builder.add_edge("generate_question", "orchestration")
@@ -765,14 +785,14 @@ class ReportGraphBuilder:
     def _build_main_graph(self, section_graph: StateGraph) -> StateGraph:
         """Build the main report graph (shared by sync/async)."""
         builder = StateGraph(ReportState, input_schema=ReportStateInput, output_schema=ReportStateOutput)
-        builder.add_node("generate_report_plan", generate_report_plan)
-        builder.add_node("human_feedback", human_feedback)
+        builder.add_node("generate_report_plan",           langfuse_node(generate_report_plan))
+        builder.add_node("human_feedback",                  langfuse_node(human_feedback))
         builder.add_node("build_section_with_web_research", section_graph.compile())
-        builder.add_node("route", route_node)
-        builder.add_node("refine_sections", refine_sections)
-        builder.add_node("gather_complete_section", gather_complete_section)
-        builder.add_node("write_final_sections", write_final_sections)
-        builder.add_node("compile_final_report", compile_final_report)
+        builder.add_node("route",                           langfuse_node(route_node))
+        builder.add_node("refine_sections",                 langfuse_node(refine_sections))
+        builder.add_node("gather_complete_section",         langfuse_node(gather_complete_section))
+        builder.add_node("write_final_sections",            langfuse_node(write_final_sections))
+        builder.add_node("compile_final_report",            langfuse_node(compile_final_report))
 
         builder.add_edge(START, "generate_report_plan")
         builder.add_edge("generate_report_plan", "human_feedback")
