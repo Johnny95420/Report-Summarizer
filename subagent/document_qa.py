@@ -352,7 +352,7 @@ def _validate_inputs(file_paths: list[dict], question: str, budget: int) -> None
         raise ValueError(f"budget must be > 0, got {budget}")
 
 
-@observe(name="document_qa")
+@observe(name="document_qa_sync")
 def run_document_qa(
     file_paths: list[dict],
     question: str,
@@ -382,7 +382,7 @@ def run_document_qa(
     return answer
 
 
-@observe(name="document_qa")
+@observe(name="document_qa_async")
 async def run_document_qa_async(
     file_paths: list[dict],
     question: str,

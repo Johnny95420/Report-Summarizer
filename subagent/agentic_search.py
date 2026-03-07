@@ -596,6 +596,10 @@ class AgenticSearchGraphBuilder:
             builder.add_node("get_searching_budget",           langfuse_node(get_searching_budget))
             builder.add_node("generate_queries_from_question", langfuse_node(generate_queries_from_question))
             builder.add_node("perform_web_search",             langfuse_node(perform_web_search))
+            # Registered without langfuse_node: these are async functions and langfuse_node
+            # wrapping async nodes silently drops spans in Langfuse 3.x OTLP mode.
+            # @observe is applied directly on the function definitions above instead.
+            # Sync nodes (all others in this graph) use langfuse_node safely.
             builder.add_node("filter_and_format_results",      filter_and_format_results)
             builder.add_node("crawl_filtered_results",         langfuse_node(crawl_filtered_results))
             builder.add_node("chunk_large_articles",           langfuse_node(chunk_large_articles))

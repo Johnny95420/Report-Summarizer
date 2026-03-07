@@ -25,6 +25,10 @@ import sys as _sys
 # importlib.reload() call are preserved — reload() re-executes the module body in the SAME
 # namespace without clearing it first, so a pre-existing attribute (set by patch) survives
 # as long as the module code does not unconditionally overwrite it.
+#
+# Test-patching requirement: patches must be applied BEFORE this module is first imported,
+# or tests must call importlib.reload(langfuse_tracing) after patching. On a fresh import
+# the guard always evaluates False and the real langfuse symbols are bound.
 if "observe" not in vars():
     from langfuse import observe  # type: ignore[assignment]  # noqa: PLC0415
 if "get_client" not in vars():
@@ -50,6 +54,10 @@ def langfuse_node(fn, name: str | None = None):
     _observe = _sys.modules[__name__].observe
 
     if inspect.iscoroutinefunction(fn):
+        # Decorator order: @_observe(name=span_name) is the outermost decorator,
+        # @functools.wraps(fn) is inner. Convention is wraps as innermost, which is
+        # what we do here. The span name comes from the explicit `name` parameter, not
+        # from fn.__name__, so the order has no effect on span naming.
         @_observe(name=span_name)
         @functools.wraps(fn)
         async def async_wrapper(*args, **kwargs):
