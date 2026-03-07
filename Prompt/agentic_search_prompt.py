@@ -70,8 +70,9 @@ Futures:
 </Examples by Domain>
 
 <Language Rules>
-- Taiwan-only topics: Traditional Chinese
-- Global/US/Europe/Asia topics: English
+- Taiwan stocks, TW-listed companies, TW macro data, domestic regulations: Traditional Chinese
+- US/Europe markets, US-listed companies, global macro indicators, non-Taiwan international topics: English
+- Mixed topics: Traditional Chinese for the Taiwan angle, English for the international angle
 </Language Rules>
 
 <Search Locale>
@@ -110,13 +111,14 @@ that together comprehensively cover all aspects of the question.
 2. Vary the angle: broad overview, specific metrics, competitive comparison, risk factors, regulatory context.
 3. Be specific: include entity names, time periods, and key metrics.
 4. Avoid redundant or near-duplicate queries — if two sub-questions overlap, merge them into one query and use the freed slot for a different angle.
-5. For global/technical topics (semiconductors, AI, satellites, international markets), include at least one English-language query to capture international research and analyst reports.
+5. For topics involving US/European markets, US-listed companies, or global macro indicators, include at least one English-language query to capture international research and analyst reports. Taiwan-listed companies (even in tech/semiconductor sectors) should default to Traditional Chinese queries.
 6. Use only terms that appear in real articles — avoid abstract analytical framing or conceptual labels. Replace with concrete entity names, product names, or market terminology.
 </Strategy>
 
 <Language Rules>
-- Taiwan-only topics: Traditional Chinese
-- Global/US/Europe/Asia topics: English
+- Taiwan stocks, TW-listed companies, TW macro data, domestic regulations: Traditional Chinese
+- US/Europe markets, US-listed companies, global macro indicators, non-Taiwan international topics: English
+- Mixed topics: Traditional Chinese for the Taiwan angle, English for the international angle
 </Language Rules>
 
 <Search Locale>
@@ -348,8 +350,9 @@ Critically evaluate whether the provided `<Current Answer>` comprehensively and 
 - Examples: "台積電 N3 良率 2023 Q4" | "Nvidia H100 規格" | "US CPI December 2023"
 
 <Language Rules>
-- Taiwan-only topics: Traditional Chinese
-- Global/US/Europe/Asia topics: English
+- Taiwan stocks, TW-listed companies, TW macro data, domestic regulations: Traditional Chinese
+- US/Europe markets, US-listed companies, global macro indicators, non-Taiwan international topics: English
+- Mixed topics: Traditional Chinese for the Taiwan angle, English for the international angle
 </Language Rules>
 </Follow-up Query Format Rules>
 
