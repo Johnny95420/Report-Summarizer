@@ -275,7 +275,7 @@ def build_document_qa_graph(tools: list):
 
     graph = StateGraph(DocumentQAState)
     graph.add_node("agent",          langfuse_node(agent_node))
-    graph.add_node("tools",          langfuse_node(tool_node, name="tools"))
+    graph.add_node("tools",          tool_node)
     graph.add_node("extract_answer", langfuse_node(extract_answer_node))
     graph.add_node("force_answer",   langfuse_node(force_answer_node))
 
