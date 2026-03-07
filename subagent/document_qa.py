@@ -27,6 +27,8 @@ from State.document_qa_state import DocumentQAState
 from Tools.reader_models import FileReference
 from Tools.text_navigator import AgentDocumentReader
 from Utils.utils import call_llm
+from langfuse import observe
+from Utils.langfuse_tracing import langfuse_node
 
 # Load configurations
 _HERE = pathlib.Path(__file__).parent.parent
@@ -272,10 +274,10 @@ def build_document_qa_graph(tools: list):
     tool_node = ToolNode(tools, handle_tool_errors=True)
 
     graph = StateGraph(DocumentQAState)
-    graph.add_node("agent", agent_node)
-    graph.add_node("tools", tool_node)
-    graph.add_node("extract_answer", extract_answer_node)
-    graph.add_node("force_answer", force_answer_node)
+    graph.add_node("agent",          langfuse_node(agent_node))
+    graph.add_node("tools",          tool_node)
+    graph.add_node("extract_answer", langfuse_node(extract_answer_node))
+    graph.add_node("force_answer",   langfuse_node(force_answer_node))
 
     graph.set_entry_point("agent")
     graph.add_conditional_edges(
@@ -350,6 +352,7 @@ def _validate_inputs(file_paths: list[dict], question: str, budget: int) -> None
         raise ValueError(f"budget must be > 0, got {budget}")
 
 
+@observe(name="document_qa_sync")
 def run_document_qa(
     file_paths: list[dict],
     question: str,
@@ -379,6 +382,7 @@ def run_document_qa(
     return answer
 
 
+@observe(name="document_qa_async")
 async def run_document_qa_async(
     file_paths: list[dict],
     question: str,
