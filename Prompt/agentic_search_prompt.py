@@ -259,6 +259,10 @@ Your answer must:
 5. Do NOT write a `### Sources` section — it will be appended automatically from the
    Source Registry. Only write [N] inline citations in the body text.
 6. Citation numbers must be consistent: [N] in the text must match [N] in the Source Registry.
+7. **Temporal attribution**: every data point must carry its time reference — the publication date of the source, the data's reference period, or the forecast horizon.
+   - Short-term data (weekly, daily, monthly) MUST include the explicit date or week (e.g., "2026/3/3 當週", "2026年2月").
+   - Never use "近期", "最近", "目前" alone — always anchor to a specific date or period.
+   - When synthesizing data from sources with different publication dates, clearly indicate which time period each figure belongs to so the downstream report writer can correctly prioritize and filter by recency.
 </Answer Format>
 
 <Citation Integrity Rules>
@@ -334,6 +338,7 @@ Critically evaluate whether the provided `<Current Answer>` comprehensively and 
     *   Is too general and lacks specific data, examples, or explanations.
     *   Raises new questions that clearly require further investigation.
     *   Has sub-questions that remain unanswered.
+    *   Contains short-term data (weekly, daily, monthly figures) without explicit dates — e.g., "本週營收上升" with no date is incomplete; "2026/3/3 當週營收上升" is acceptable.
 </Evaluation Criteria>
 
 <Action Protocol>

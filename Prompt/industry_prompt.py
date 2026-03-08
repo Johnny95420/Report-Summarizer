@@ -170,6 +170,7 @@ Your job is to craft a section of a professional report that is clear, logically
 2.  **Initial Draft**: If `Existing section content` is empty, create the first draft of the section based on the `Source material`.
 3.  **Refine and Deepen**: If `Existing section content` exists, your goal is to enhance, deepen, and refine it using the new `Source material` and `Follow-up questions`, not just append new information.
 4.  **Prioritize Timeliness**: Give strong preference to the most recent sources provided in the `<Source material>`. When discussing trends or data, always be mindful of the source's date. Avoid presenting outdated information as if it were current. If older data is necessary for historical context, explicitly state its time frame.
+    - **Institutional report data**: Content under "Institutional Reports Answer" often contains data from reports with different publication dates. Pay close attention to the temporal markers (report dates, data periods, forecast horizons) embedded in the content. Do NOT treat all institutional data as equally current — a figure from a 2025/12 report is older than one from a 2026/3 report. When the section topic targets a specific time interval, only use institutional data whose reference period falls within or is relevant to that interval. Older institutional data should be used only as background context and explicitly labeled as such.
 5.  **Target Interval First — Critical**: Scan the `<Section topic>` for any explicit time interval (e.g., "Q3 2024", "2024年上半年", "近六個月", "過去一年").
     - If found: the section content MUST be primarily built on data and events from within that interval. Long-term or historical information may appear only as background context, and must be explicitly labeled as such (e.g., "作為背景，…").
     - Do NOT let general long-term trends crowd out or replace the interval-specific facts the reader actually needs.
@@ -223,6 +224,7 @@ Your job is to craft a section of a professional report that is clear, logically
      * Traceable publication date
      * Complete URL for verification
    - Avoid citing: anonymous blogs, social media personal posts, reposted content lacking source attribution, content with unidentifiable origins
+   - **Institutional report sources**: Content labeled "Institutional Reports Answer" in the source material originates from licensed institutional research providers (Provider A and Provider B). These are high-credibility, professional-grade sources suitable for direct citation. Use the report title from the content as the citation title.
    - NEVER create URL-like references that do not exist in the source material
    - NEVER fabricate dates or add "accessed on" information not provided
    - If a source in the material lacks a title or date, mark it as "[Source without title]" rather than fabricating one
@@ -296,6 +298,11 @@ Your goal is not just to pass or fail, but to **ensure the content reaches an ex
         * **Financial Correctness:** Are financial data, models, assumptions, and interpretations sound and clearly articulated?
         * **Investment Analysis Depth:** Does the analysis go significantly beyond surface-level observations? Does it critically assess risks, opportunities, valuation, and competitive dynamics?
         * **Quantitative Metrics & Data Support:** Does the section effectively use relevant and sufficient quantitative data? Are sources credible and appropriately cited?
+        * **Temporal Precision:**
+          * Does every data point, forecast, and metric clearly state its reference period (e.g., "2026Q1", "2025年全年", "2026/3/3 當週")?
+          * Are there vague temporal references like "近期", "目前", "最新" without an anchored date? If so, this is a weakness.
+          * If the section topic specifies a target time interval, is the content primarily built on data from within that interval? Is older data explicitly labeled as background context?
+          * Are data points from different time periods clearly distinguished, or could the reader confuse a 2025/12 figure with a 2026/3 figure?
         * **Source Citation Integrity:**
           * Does EVERY inline citation `[N]` correspond to an entry `[N]` in the `### Sources` list?
           * Does EVERY `[N]` in the Sources list map to a source that ACTUALLY EXISTS in the source material?
@@ -374,6 +381,12 @@ For Conclusion/Summary:
 3. Writing Approach:
 - Use concrete details over general statements
 - Make every word count
+
+4. Temporal Awareness:
+- When synthesizing the report, preserve the time context of data from individual sections.
+- The introduction should establish the report's time frame (e.g., "本報告以 2026 年 3 月初為基準時間點").
+- The conclusion must not flatten different time periods into a single narrative — when comparing or synthesizing data across sections, explicitly state the time period each figure refers to.
+- Do NOT use vague temporal terms ("近期", "目前") without anchoring to a specific date or period derived from the section content.
 </Task>
 
 <Quality Checks>
@@ -381,6 +394,7 @@ For Conclusion/Summary:
 - For introduction: 200-1000 word limit, # for report title, no structural elements, no sources section
 - For conclusion: 200-1000 word limit, ## for section title
 - Do not include word count or any preamble in your response
+- Temporal references are explicit and anchored (no unanchored "近期", "目前", "最新")
 </Quality Checks>
 
 <Section topic>
@@ -426,6 +440,7 @@ refine_section_instructions = (
         a) **Remove it** if it cannot be substantiated.
         b) **Flag it** by generating a precise query under `<Query Requirements>` to seek verification, quantification, or clarification.
     - **Prioritize Verifiable Facts**: When rewriting, give strong preference to information that is clearly sourced and quantitatively supported. Downplay or remove speculative or poorly substantiated claims.
+    - **Temporal Conflict Resolution**: When the full report context contains data from different time periods for the same metric (e.g., a 2025/12 EPS estimate and a 2026/3 EPS estimate), do NOT silently pick one. Clearly state the more recent figure as the current view and, if relevant, note the prior figure as context (e.g., "原先預估為 X（2025/12 報告），最新上修至 Y（2026/3 報告）"). Vague temporal references ("近期", "目前") in the original content should be resolved to specific dates using the full report context, or flagged as a weakness if unresolvable.
 - Prefer quantitative detail when suitable (KPI, YoY/HoH, penetration, valuation multiples, capacity, ASP, users, conversion, margins, etc.).
 - **Cross-Section Integrity**: Strictly maintain logical boundaries between sections. Information must be placed in its most appropriate section. When refining, **remove content that belongs in other sections** and avoid duplicating material. Use brief cross-references (e.g., `詳見[其他章節名稱]`) where needed.
 - **Do not delete** any existing numbered citation markers in the original content (e.g., [1], [2]).
@@ -584,6 +599,7 @@ Before completing, verify:
 4. **Professional Standards Met**: The content meets institutional research publication standards
 5. **Format Requirements Satisfied**: All structural and formatting requirements are correctly implemented
 6. **Source Integrity Preserved**: All original numbered citation markers are maintained, each [N] has a matching `### Sources` entry
+7. **Temporal Precision Verified**: Every data point, forecast, and metric has an explicit time reference (report date, data period, or forecast horizon). No unanchored "近期", "目前", or "最新" remains. Data from different time periods is clearly distinguished — the reader can tell which figures are from 2025/12 vs. 2026/3.
 </Final Quality Validation>
 
 <Full Report Context>
