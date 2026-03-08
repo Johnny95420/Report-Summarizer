@@ -136,3 +136,18 @@ Grade:
 When grading 'fail', provide a concise hint about which aspect needs more research.
 Output ONLY via the outer_reflect_formatter tool.
 """
+
+document_selection_instruction = """You are selecting which research documents are relevant for a research sub-goal.
+
+<Sub-goal>
+{sub_goal}
+</Sub-goal>
+
+<Available Documents>
+{doc_summary}
+</Available Documents>
+
+Select the document names that are most likely to contain information relevant to
+the sub-goal. Include all documents if unsure.
+Output ONLY via the document_selection_formatter tool.
+"""

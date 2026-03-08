@@ -24,6 +24,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 
 from Prompt.auth_source_prompt import (
+    document_selection_instruction,
     generate_download_queries_instruction,
     outer_reflect_instruction,
     plan_sub_goal_instruction,
@@ -395,12 +396,9 @@ def _select_documents(sub_goal: str, downloaded_reports: list[dict], is_retry: b
         return downloaded_reports
 
     doc_summary = "\n".join(f"- name: {r['name']} (source: {r['source']})" for r in downloaded_reports)
-    system_instruction = (
-        "You are selecting which research documents are relevant for a research sub-goal.\n\n"
-        f"Sub-goal:\n{sub_goal}\n\n"
-        f"Available documents:\n{doc_summary}\n\n"
-        "Select the document names that are most likely to contain information relevant to "
-        "the sub-goal. Include all documents if unsure."
+    system_instruction = document_selection_instruction.format(
+        sub_goal=sub_goal,
+        doc_summary=doc_summary,
     )
     try:
         result = call_llm(
@@ -561,15 +559,15 @@ async def run_auth_source_search(
     """
     from Tools.text_navigator import AgentDocumentReader
 
-    reader_tmp_dir = _READER_TMP_DIR
-    os.makedirs(reader_tmp_dir, exist_ok=True)
+    reader_tmp = pathlib.Path(_READER_TMP_DIR)
+    reader_tmp.mkdir(parents=True, exist_ok=True)
 
     navigator = AgentDocumentReader()
-    nav_state_path = os.path.join(reader_tmp_dir, f"auth_nav_{uuid.uuid4().hex}.json")
+    nav_state_path = str(reader_tmp / f"auth_nav_{uuid.uuid4().hex}.json")
 
     # Per-run work directory (symlinks to global cache)
-    run_dir = os.path.join(reader_tmp_dir, f"auth_run_{uuid.uuid4().hex}")
-    os.makedirs(run_dir, exist_ok=True)
+    run_dir = str(reader_tmp / f"auth_run_{uuid.uuid4().hex}")
+    pathlib.Path(run_dir).mkdir(parents=True, exist_ok=True)
 
     initial_state: dict = {
         "question": question,

@@ -15,12 +15,12 @@ import os
 from pathlib import Path
 from typing import Literal
 
-import requests
 from langchain_core.documents import Document
 from langchain_core.tools import tool
 from omegaconf import OmegaConf
 
 from Tools.reader_models import BaseReaderDocument, sanitize_name
+from Utils.utils import http_session
 
 logger = logging.getLogger("AuthSourceTools")
 
@@ -41,7 +41,7 @@ def _get_stock_tools_base_url() -> str:
 
 def _ensure_symlink(global_path: str, run_dir: str) -> str:
     """Create a symlink in run_dir pointing to global_path. Return symlink path."""
-    link_name = os.path.basename(global_path)
+    link_name = Path(global_path).name
     link_path = os.path.join(run_dir, link_name)
     with contextlib.suppress(FileExistsError):
         os.symlink(os.path.abspath(global_path), link_path)
@@ -143,8 +143,20 @@ def download_investanchor_report(
         logger.warning("INVESTANCHOR_COOKIE is not set")
         return json.dumps({"error": "cookie_not_set", "source": "investanchor"})
 
+    # Deterministic naming -- same query always produces same filename
+    doc_name = f"investanchor_{sanitize_name(query)}"
+    global_dir = Path(_READER_TMP_DIR)
+    global_dir.mkdir(parents=True, exist_ok=True)
+    global_path = str(global_dir / f"{doc_name}.json")
+
+    # L1 cache check: skip HTTP if global cache file already exists
+    if os.path.exists(global_path):
+        logger.info("Cache hit for InvestAnchor report: %s", query)
+        path = _ensure_symlink(global_path, _run_dir) if _run_dir else global_path
+        return json.dumps({"name": doc_name, "path": path, "source": "investanchor"})
+
     try:
-        resp = requests.get(
+        resp = http_session.get(
             f"{_get_stock_tools_base_url()}/investanchor",
             params={"keyword": query, "limit": max_results},
             headers={"X-Investanchor-Cookie": cookie},
@@ -167,12 +179,6 @@ def download_investanchor_report(
             )
             pages.append(Document(page_content=text, metadata={"source": "investanchor"}))
 
-        # Deterministic naming -- same query always produces same filename
-        doc_name = f"investanchor_{sanitize_name(query)}"
-        global_dir = Path(_READER_TMP_DIR)
-        global_dir.mkdir(parents=True, exist_ok=True)
-        global_path = str(global_dir / f"{doc_name}.json")
-
         doc = BaseReaderDocument(date=None, name=doc_name, outlines=[], pages=pages)
         doc.save(global_path)
 
@@ -181,7 +187,7 @@ def download_investanchor_report(
 
         return json.dumps({"name": doc_name, "path": path, "source": "investanchor"})
 
-    except requests.RequestException as e:
+    except Exception as e:
         logger.error("InvestAnchor API error: %s", e)
         return json.dumps({"error": str(e), "source": "investanchor"})
 
@@ -215,7 +221,7 @@ def download_yuanta_report(
         return json.dumps({"error": "cookie_not_set", "source": "yuanta"})
 
     try:
-        resp = requests.post(
+        resp = http_session.post(
             f"{_get_stock_tools_base_url()}/yuanta/search-and-download",
             params={"keyword": query, "limit": max_results},
             headers={"X-Yuanta-Cookies": cookie},
@@ -273,7 +279,7 @@ def download_yuanta_report(
                     asyncio.run(proc.parse())
 
                     # PDFDocumentPreprocessor reads JSON output -> _doc.json
-                    doc_name = os.path.splitext(os.path.basename(pdf_path))[0]
+                    doc_name = Path(pdf_path).stem
                     _, doc_path = preprocessor.preprocess(tmpdir, doc_name)
 
                     # Symlink into per-run dir
@@ -289,6 +295,6 @@ def download_yuanta_report(
 
         return json.dumps(results)
 
-    except requests.RequestException as e:
+    except Exception as e:
         logger.error("Yuanta API error: %s", e)
         return json.dumps({"error": str(e), "source": "yuanta"})

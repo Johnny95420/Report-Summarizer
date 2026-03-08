@@ -166,7 +166,7 @@ def test_download_yuanta_cache_hit_skips_processing(tmp_path):
     mock_resp.raise_for_status.return_value = None
 
     with (
-        patch("Tools.auth_source_tools.requests.post", return_value=mock_resp),
+        patch("Tools.auth_source_tools.http_session.post", return_value=mock_resp),
         patch("Tools.auth_source_tools._READER_TMP_DIR", str(tmp_path)),
     ):
         result = json.loads(
@@ -209,7 +209,7 @@ def test_download_investanchor_deterministic_naming(tmp_path):
     mock_resp.raise_for_status.return_value = None
 
     with (
-        patch("Tools.auth_source_tools.requests.get", return_value=mock_resp),
+        patch("Tools.auth_source_tools.http_session.get", return_value=mock_resp),
         patch("Tools.auth_source_tools._READER_TMP_DIR", str(tmp_path)),
     ):
         result1 = json.loads(
@@ -225,7 +225,7 @@ def test_download_investanchor_deterministic_naming(tmp_path):
     assert Path(result1["path"]).exists()
     # Call again -- should produce same global filename (deterministic)
     with (
-        patch("Tools.auth_source_tools.requests.get", return_value=mock_resp),
+        patch("Tools.auth_source_tools.http_session.get", return_value=mock_resp),
         patch("Tools.auth_source_tools._READER_TMP_DIR", str(tmp_path)),
     ):
         result2 = json.loads(
