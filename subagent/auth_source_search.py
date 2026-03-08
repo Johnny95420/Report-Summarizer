@@ -450,46 +450,46 @@ async def qa_agent_node(state: AuthReportState, config: RunnableConfig) -> dict:
             _save_navigator_state(navigator, navigator_state_path)
         return {"curr_answer": "", "selected_reports": []}
 
-    # Step 1: select relevant documents
-    selected_reports = _select_documents(sub_goal, downloaded_reports, is_retry)
-    file_paths = [{"name": r["name"], "path": r["path"]} for r in selected_reports]
-
-    # Step 2: build question
-    question = sub_goal
-    if qa_weakness:
-        question = f"{sub_goal}\n\n特別補強：{qa_weakness}"
-
-    doc_list = "\n".join(f"- name: {fp['name']}\n  path: {fp['path']}" for fp in file_paths)
-    system_prompt = DOCUMENT_QA_SYSTEM_PROMPT.format(budget=qa_budget, doc_list=doc_list)
-
-    messages = [SystemMessage(content=system_prompt), HumanMessage(content=question)]
-    if curr_answer.strip():
-        messages.append(HumanMessage(content=f"\n\n已有的初步答案（請在此基礎上補充）：\n{curr_answer}"))
-
-    all_tools = navigator.get_tools() + [submit_answer]
-    graph = build_document_qa_graph(all_tools)
-    initial_state = {
-        "messages": messages,
-        "file_paths": file_paths,
-        "question": question,
-        "budget": qa_budget,
-        "iteration": 0,
-        "answer": "",
-        "consecutive_errors": 0,
-        "consecutive_text_only": 0,
-    }
-    invoke_config = {"configurable": {"tools": all_tools}}
-
+    selected_reports = []
     try:
+        # Step 1: select relevant documents
+        selected_reports = _select_documents(sub_goal, downloaded_reports, is_retry)
+        file_paths = [{"name": r["name"], "path": r["path"]} for r in selected_reports]
+
+        # Step 2: build question
+        question = sub_goal
+        if qa_weakness:
+            question = f"{sub_goal}\n\n特別補強：{qa_weakness}"
+
+        doc_list = "\n".join(f"- name: {fp['name']}\n  path: {fp['path']}" for fp in file_paths)
+        system_prompt = DOCUMENT_QA_SYSTEM_PROMPT.format(budget=qa_budget, doc_list=doc_list)
+
+        messages = [SystemMessage(content=system_prompt), HumanMessage(content=question)]
+        if curr_answer.strip():
+            messages.append(HumanMessage(content=f"\n\n已有的初步答案（請在此基礎上補充）：\n{curr_answer}"))
+
+        all_tools = navigator.get_tools() + [submit_answer]
+        graph = build_document_qa_graph(all_tools)
+        initial_state = {
+            "messages": messages,
+            "file_paths": file_paths,
+            "question": question,
+            "budget": qa_budget,
+            "iteration": 0,
+            "answer": "",
+            "consecutive_errors": 0,
+            "consecutive_text_only": 0,
+        }
+        invoke_config = {"configurable": {"tools": all_tools}}
+
         result = await asyncio.to_thread(graph.invoke, initial_state, invoke_config)
         raw_answer = result.get("answer", "")
     except Exception as e:
         logger.error("[qa_agent] Document QA failed: %s", e)
         raw_answer = ""
+    finally:
+        if navigator_state_path:
+            _save_navigator_state(navigator, navigator_state_path)
 
     sanitized = _sanitize_qa_answer(raw_answer)
-
-    if navigator_state_path:
-        _save_navigator_state(navigator, navigator_state_path)
-
     return {"curr_answer": sanitized, "selected_reports": selected_reports}

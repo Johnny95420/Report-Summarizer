@@ -936,3 +936,4 @@ def test_qa_agent_exception_returns_empty():
         result = asyncio.run(qa_agent_node(state, config))
 
     assert result["curr_answer"] == ""
+    assert "selected_reports" in result
