@@ -236,3 +236,35 @@ def test_download_investanchor_deterministic_naming(tmp_path):
             )
         )
     assert result1["name"] == result2["name"]
+
+
+def test_prompts_have_required_format_keys():
+    from Prompt.auth_source_prompt import (
+        generate_download_queries_instruction,
+        outer_reflect_instruction,
+        plan_sub_goal_instruction,
+        reflect_download_instruction,
+        reflect_qa_instruction,
+        synthesize_pair_answer_instruction,
+    )
+
+    assert "{question}" in plan_sub_goal_instruction
+    assert "{sub_goal_history}" in plan_sub_goal_instruction
+    assert "{answer}" in plan_sub_goal_instruction
+
+    assert "{sub_goal}" in generate_download_queries_instruction
+    assert "{download_weakness}" in generate_download_queries_instruction
+    assert "{already_downloaded}" in generate_download_queries_instruction
+
+    assert "{sub_goal}" in reflect_download_instruction
+    assert "{reports_summary}" in reflect_download_instruction
+
+    assert "{sub_goal}" in reflect_qa_instruction
+    assert "{curr_answer}" in reflect_qa_instruction
+
+    assert "{sub_goal}" in synthesize_pair_answer_instruction
+    assert "{curr_answer}" in synthesize_pair_answer_instruction
+    assert "{accumulated_answer}" in synthesize_pair_answer_instruction
+
+    assert "{question}" in outer_reflect_instruction
+    assert "{answer}" in outer_reflect_instruction
