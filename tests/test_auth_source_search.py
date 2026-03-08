@@ -781,3 +781,158 @@ def test_synthesize_pair_answer_first_pair_no_merge():
     mock_llm.assert_not_called()
     assert result["answer"] == "第一個答案"
     assert result["pair_count"] == 1
+
+
+# -- qa_agent --
+
+
+def _make_nav():
+    from unittest.mock import MagicMock
+
+    nav = MagicMock()
+    nav.get_tools.return_value = []
+    nav._bookmarks = {}
+    nav._current_path = None
+    return nav
+
+
+def _make_selection_response(names: list[str]):
+    """Fake call_llm response for _select_documents."""
+    from unittest.mock import MagicMock
+
+    mock = MagicMock()
+    mock.tool_calls = [{"args": {"selected_names": names}}]
+    return mock
+
+
+def test_qa_agent_no_files_returns_empty():
+    """When downloaded_reports is empty, skip Document QA and return curr_answer=''."""
+    import asyncio
+
+    from subagent.auth_source_search import qa_agent_node
+
+    config = {"configurable": {"shared_navigator": _make_nav()}}
+    result = asyncio.run(qa_agent_node(_base_state(downloaded_reports=[]), config))
+    assert result["curr_answer"] == ""
+    assert result["selected_reports"] == []
+
+
+def test_qa_agent_selects_subset_of_documents():
+    """LLM selects one document; only that one is passed to Document QA."""
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from subagent.auth_source_search import qa_agent_node
+
+    reports = [
+        {"name": "ReportA", "path": "/a.json", "source": "investanchor"},
+        {"name": "ReportB", "path": "/b.json", "source": "yuanta"},
+    ]
+    fake_graph = MagicMock()
+    fake_graph.invoke.return_value = {"answer": "分析結果"}
+    config = {"configurable": {"shared_navigator": _make_nav()}}
+
+    with (
+        patch("subagent.auth_source_search.call_llm", return_value=_make_selection_response(["ReportA"])),
+        patch("subagent.auth_source_search.build_document_qa_graph", return_value=fake_graph),
+    ):
+        result = asyncio.run(qa_agent_node(_base_state(downloaded_reports=reports), config))
+
+    assert result["selected_reports"] == [reports[0]]
+    call_kwargs = fake_graph.invoke.call_args[0][0]
+    assert len(call_kwargs["file_paths"]) == 1
+    assert call_kwargs["file_paths"][0]["name"] == "ReportA"
+
+
+def test_qa_agent_retry_uses_all_documents():
+    """On QA retry (qa_weakness set), all documents are used regardless of selection."""
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from subagent.auth_source_search import qa_agent_node
+
+    reports = [
+        {"name": "ReportA", "path": "/a.json", "source": "investanchor"},
+        {"name": "ReportB", "path": "/b.json", "source": "yuanta"},
+    ]
+    fake_graph = MagicMock()
+    fake_graph.invoke.return_value = {"answer": "補充答案"}
+    config = {"configurable": {"shared_navigator": _make_nav()}}
+
+    state = _base_state(downloaded_reports=reports, qa_weakness="缺少財務數據")
+    with (
+        patch("subagent.auth_source_search.call_llm") as mock_llm,
+        patch("subagent.auth_source_search.build_document_qa_graph", return_value=fake_graph),
+    ):
+        result = asyncio.run(qa_agent_node(state, config))
+
+    mock_llm.assert_not_called()
+    assert result["selected_reports"] == reports
+
+
+def test_qa_agent_selection_fallback_on_empty_llm():
+    """If LLM returns empty selection, fall back to all documents."""
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from subagent.auth_source_search import qa_agent_node
+
+    reports = [
+        {"name": "ReportA", "path": "/a.json", "source": "investanchor"},
+        {"name": "ReportB", "path": "/b.json", "source": "yuanta"},
+    ]
+    fake_graph = MagicMock()
+    fake_graph.invoke.return_value = {"answer": "答案"}
+    config = {"configurable": {"shared_navigator": _make_nav()}}
+
+    with (
+        patch("subagent.auth_source_search.call_llm", return_value=_make_selection_response([])),
+        patch("subagent.auth_source_search.build_document_qa_graph", return_value=fake_graph),
+    ):
+        result = asyncio.run(qa_agent_node(_base_state(downloaded_reports=reports), config))
+
+    assert result["selected_reports"] == reports
+
+
+def test_qa_agent_sanitizes_sentinel_answer():
+    """Document QA sentinel output is sanitised to empty string."""
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from subagent.auth_source_search import qa_agent_node
+
+    fake_graph = MagicMock()
+    fake_graph.invoke.return_value = {"answer": "[Unable to extract answer from documents]"}
+    config = {"configurable": {"shared_navigator": _make_nav()}}
+
+    reports = [{"name": "Doc", "path": "/doc.json", "source": "investanchor"}]
+    state = _base_state(downloaded_reports=reports)
+    with (
+        patch("subagent.auth_source_search.call_llm", return_value=_make_selection_response(["Doc"])),
+        patch("subagent.auth_source_search.build_document_qa_graph", return_value=fake_graph),
+    ):
+        result = asyncio.run(qa_agent_node(state, config))
+
+    assert result["curr_answer"] == ""
+
+
+def test_qa_agent_exception_returns_empty():
+    """If graph.invoke raises, qa_agent catches it and returns curr_answer=''."""
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from subagent.auth_source_search import qa_agent_node
+
+    fake_graph = MagicMock()
+    fake_graph.invoke.side_effect = RuntimeError("Document QA crashed")
+    config = {"configurable": {"shared_navigator": _make_nav()}}
+
+    reports = [{"name": "Doc", "path": "/doc.json", "source": "investanchor"}]
+    state = _base_state(downloaded_reports=reports)
+    with (
+        patch("subagent.auth_source_search.call_llm", return_value=_make_selection_response(["Doc"])),
+        patch("subagent.auth_source_search.build_document_qa_graph", return_value=fake_graph),
+    ):
+        result = asyncio.run(qa_agent_node(state, config))
+
+    assert result["curr_answer"] == ""

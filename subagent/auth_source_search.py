@@ -8,6 +8,7 @@ File strategy: two-layer directory.
   - Per-run dir:  reader_tmp/auth_run_{uuid}/ (symlinks, deleted after run)
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -28,8 +29,11 @@ from Prompt.auth_source_prompt import (
     reflect_qa_instruction,
     synthesize_pair_answer_instruction,
 )
+from Prompt.document_qa_prompt import DOCUMENT_QA_SYSTEM_PROMPT
 from State.auth_source_state import AuthReportState
+from subagent.document_qa import build_document_qa_graph, submit_answer
 from Tools.auth_source_tools import (
+    document_selection_formatter,
     download_investanchor_report,
     download_queries_formatter,
     download_yuanta_report,
@@ -374,3 +378,118 @@ def synthesize_pair_answer_node(state: AuthReportState) -> dict:
     )
     merged = response.tool_calls[0]["args"]["merged_answer"]
     return {"answer": merged, "pair_count": pair_count + 1}
+
+
+# ---------------------------------------------------------------------------
+# Document selection helper
+# ---------------------------------------------------------------------------
+def _select_documents(sub_goal: str, downloaded_reports: list[dict], is_retry: bool) -> list[dict]:
+    """LLM selects which downloaded documents are relevant for sub_goal.
+
+    On retry (is_retry=True) always returns all reports to cast a wider net.
+    Falls back to all reports if LLM returns empty list or call fails.
+    """
+    if is_retry or len(downloaded_reports) <= 1:
+        return downloaded_reports
+
+    doc_summary = "\n".join(f"- name: {r['name']} (source: {r['source']})" for r in downloaded_reports)
+    system_instruction = (
+        "You are selecting which research documents are relevant for a research sub-goal.\n\n"
+        f"Sub-goal:\n{sub_goal}\n\n"
+        f"Available documents:\n{doc_summary}\n\n"
+        "Select the document names that are most likely to contain information relevant to "
+        "the sub-goal. Include all documents if unsure."
+    )
+    try:
+        result = call_llm(
+            LIGHT_MODEL_NAME,
+            BACKUP_LIGHT_MODEL_NAME,
+            prompt=[
+                SystemMessage(content=system_instruction),
+                HumanMessage(content="Select relevant documents."),
+            ],
+            tool=[document_selection_formatter],
+            tool_choice="required",
+        )
+        raw = result.tool_calls[0]["args"]["selected_names"]
+        selected_names = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception as e:
+        logger.warning("[qa_agent] Document selection LLM call failed (%s) — using all reports", e)
+        return downloaded_reports
+
+    name_set = set(selected_names)
+    selected = [r for r in downloaded_reports if r["name"] in name_set]
+    if not selected:
+        logger.warning("[qa_agent] LLM selected no documents — falling back to all reports")
+        return downloaded_reports
+
+    logger.info("[qa_agent] Selected %d/%d documents: %s", len(selected), len(downloaded_reports), selected_names)
+    return selected
+
+
+# ---------------------------------------------------------------------------
+# qa_agent node (async)
+# ---------------------------------------------------------------------------
+async def qa_agent_node(state: AuthReportState, config: RunnableConfig) -> dict:
+    """Run Document QA on downloaded reports using the shared navigator."""
+    navigator = config["configurable"]["shared_navigator"]
+    navigator_state_path = state.get("navigator_state_path", "")
+    downloaded_reports = state.get("downloaded_reports", [])
+    qa_budget = state.get("qa_budget", 30)
+    sub_goal = state["sub_goal"]
+    qa_weakness = state.get("qa_weakness", "")
+    curr_answer = state.get("curr_answer", "")
+    is_retry = bool(qa_weakness)
+
+    if navigator_state_path:
+        _restore_navigator_state(navigator, navigator_state_path)
+
+    if not downloaded_reports:
+        logger.warning("[qa_agent] No downloaded reports — skipping Document QA")
+        if navigator_state_path:
+            _save_navigator_state(navigator, navigator_state_path)
+        return {"curr_answer": "", "selected_reports": []}
+
+    # Step 1: select relevant documents
+    selected_reports = _select_documents(sub_goal, downloaded_reports, is_retry)
+    file_paths = [{"name": r["name"], "path": r["path"]} for r in selected_reports]
+
+    # Step 2: build question
+    question = sub_goal
+    if qa_weakness:
+        question = f"{sub_goal}\n\n特別補強：{qa_weakness}"
+
+    doc_list = "\n".join(f"- name: {fp['name']}\n  path: {fp['path']}" for fp in file_paths)
+    system_prompt = DOCUMENT_QA_SYSTEM_PROMPT.format(budget=qa_budget, doc_list=doc_list)
+
+    messages = [SystemMessage(content=system_prompt), HumanMessage(content=question)]
+    if curr_answer.strip():
+        messages.append(HumanMessage(content=f"\n\n已有的初步答案（請在此基礎上補充）：\n{curr_answer}"))
+
+    all_tools = navigator.get_tools() + [submit_answer]
+    graph = build_document_qa_graph(all_tools)
+    initial_state = {
+        "messages": messages,
+        "file_paths": file_paths,
+        "question": question,
+        "budget": qa_budget,
+        "iteration": 0,
+        "answer": "",
+        "consecutive_errors": 0,
+        "consecutive_text_only": 0,
+    }
+    invoke_config = {"configurable": {"tools": all_tools}}
+
+    try:
+        result = await asyncio.to_thread(graph.invoke, initial_state, invoke_config)
+        raw_answer = result.get("answer", "")
+    except Exception as e:
+        logger.error("[qa_agent] Document QA failed: %s", e)
+        raw_answer = ""
+
+    sanitized = _sanitize_qa_answer(raw_answer)
+
+    if navigator_state_path:
+        _save_navigator_state(navigator, navigator_state_path)
+
+    return {"curr_answer": sanitized, "selected_reports": selected_reports}
