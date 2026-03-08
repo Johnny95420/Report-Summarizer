@@ -20,6 +20,44 @@ A modular and automated research report generation tool designed for **in-depth 
 
 ---
 
+## 🔭 Observability (Langfuse)
+
+All tracing is centralized in `Utils/langfuse_tracing.py`. Application code must **never import from `langfuse` directly** — always import from `Utils.langfuse_tracing`.
+
+### API
+
+| Function | Purpose |
+|----------|---------|
+| `langfuse_node(fn, name=, state_key=)` | Wrap every LangGraph node — creates a span that nests child calls automatically |
+| `traced(name)` | Context-manager span for `asyncio.gather` closures or arbitrary code blocks |
+| `traced_thread(fn, *args, **kwargs)` | Run sync function in `asyncio.to_thread` with OTel context propagated (prevents orphan spans) |
+| `observe` | Decorator for top-level entry points and standalone utility functions |
+| `get_langfuse_callback()` | Returns a LangChain `CallbackHandler` linked to the current Langfuse trace |
+
+### Key Rules
+
+1. **Single import source** — `from Utils.langfuse_tracing import langfuse_node, traced, ...`
+2. **All graph nodes use `langfuse_node()`** — use `state_key="section.name"` for parallel section disambiguation
+3. **Never use raw `asyncio.to_thread`** — use `traced_thread` to propagate OTel parent context to worker threads
+4. **`asyncio.gather` closures use `traced()`** — each concurrent task gets its own named span
+5. **`@observe` for entry points only** — not for LangGraph node functions
+
+```python
+# Graph node wrapping
+builder.add_node("my_node", langfuse_node(my_fn))
+builder.add_node("write",   langfuse_node(write_section, state_key="section.name"))
+
+# Sync graph in async context
+result = await traced_thread(graph.invoke, state, config)
+
+# Concurrent sub-agents
+async def _do_web():
+    with traced("web_search"):
+        return await search_graph.ainvoke(...)
+```
+
+---
+
 ## 📁 File Overview
 
 | File/Folder             | Description                                                                     |
