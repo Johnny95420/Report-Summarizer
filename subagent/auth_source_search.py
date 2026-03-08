@@ -15,6 +15,13 @@ import pathlib
 import re
 
 import omegaconf
+from langchain_core.runnables import RunnableConfig
+
+from State.auth_source_state import AuthReportState
+from Tools.auth_source_tools import (
+    download_investanchor_report,
+    download_yuanta_report,
+)
 
 _HERE = pathlib.Path(__file__).parent.parent
 _config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
@@ -82,3 +89,59 @@ def _restore_navigator_state(navigator, path: str) -> None:
     last_path = saved.get("last_open_path")
     if last_path and os.path.exists(last_path):
         navigator.open_document(last_path)
+
+
+# ---------------------------------------------------------------------------
+# execute_downloads node (Python -- no LLM)
+# ---------------------------------------------------------------------------
+def execute_downloads_node(state: AuthReportState, config: RunnableConfig) -> dict:
+    """Download reports from InvestAnchor and Yuanta based on generated queries.
+
+    Gets shared_pdf_converter and run_dir from config["configurable"].
+    Deduplicates by (name, source). All API errors are logged and skipped.
+    """
+    download_queries = state.get("download_queries", {})
+    existing_reports = state.get("downloaded_reports", [])
+    existing_keys = {(r["name"], r["source"]) for r in existing_reports}
+    new_reports = list(existing_reports)
+    converter = config["configurable"].get("shared_pdf_converter")
+    run_dir = config["configurable"].get("run_dir", "")
+
+    def _add_if_new(result: dict) -> None:
+        key = (result["name"], result["source"])
+        if key not in existing_keys:
+            new_reports.append(result)
+            existing_keys.add(key)
+
+    # InvestAnchor: returns single {"name", "path", "source"} dict
+    if ia_query := download_queries.get("investanchor"):
+        try:
+            result_str = download_investanchor_report(ia_query, _run_dir=run_dir)
+            result = json.loads(result_str)
+            if "error" in result:
+                logger.warning("[execute_downloads] investanchor error: %s", result.get("error"))
+            else:
+                _add_if_new(result)
+        except Exception as e:
+            logger.error("[execute_downloads] investanchor download failed: %s", e)
+
+    # Yuanta: returns list of {"name", "path", "source"} dicts (or error dict)
+    if yuanta_query := download_queries.get("yuanta"):
+        try:
+            result_str = download_yuanta_report(
+                yuanta_query,
+                _converter=converter,
+                _run_dir=run_dir,
+            )
+            result = json.loads(result_str)
+            if isinstance(result, dict) and "error" in result:
+                logger.warning("[execute_downloads] yuanta error: %s", result.get("error"))
+            elif isinstance(result, list):
+                for item in result:
+                    _add_if_new(item)
+            else:
+                _add_if_new(result)
+        except Exception as e:
+            logger.error("[execute_downloads] yuanta download failed: %s", e)
+
+    return {"downloaded_reports": new_reports}

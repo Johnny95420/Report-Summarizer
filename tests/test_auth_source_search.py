@@ -386,3 +386,136 @@ def test_restore_navigator_state_missing_file(tmp_path):
     nav = MagicMock()
     _restore_navigator_state(nav, str(tmp_path / "nonexistent.json"))
     nav.open_document.assert_not_called()
+
+
+# -- execute_downloads_node --
+
+
+def _base_state(**overrides):
+    """Minimal AuthReportState dict for testing individual nodes."""
+    state = {
+        "question": "Test question",
+        "max_pairs": 3,
+        "max_download_reflections": 1,
+        "max_qa_reflections": 1,
+        "qa_budget": 10,
+        "sub_goal": "Test sub-goal",
+        "sub_goal_history": [],
+        "download_queries": {"investanchor": "台積電 2024", "yuanta": None},
+        "download_weakness": "",
+        "download_reflection_count": 0,
+        "downloaded_reports": [],
+        "selected_reports": [],
+        "curr_answer": "",
+        "qa_weakness": "",
+        "qa_reflection_count": 0,
+        "navigator_state_path": "",
+        "answer": "",
+        "pair_count": 0,
+    }
+    state.update(overrides)
+    return state
+
+
+def _make_config(**overrides):
+    cfg = {"configurable": {"shared_pdf_converter": None, "run_dir": "/tmp/test_run"}}
+    cfg["configurable"].update(overrides)
+    return cfg
+
+
+def test_execute_downloads_adds_new_report():
+    import json
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import execute_downloads_node
+
+    fake = json.dumps({"name": "ReportA", "path": "/tmp/a.json", "source": "investanchor"})
+    with (
+        patch("subagent.auth_source_search.download_investanchor_report", return_value=fake),
+        patch(
+            "subagent.auth_source_search.download_yuanta_report",
+            return_value=json.dumps({"error": "no_results", "source": "yuanta"}),
+        ),
+    ):
+        result = execute_downloads_node(_base_state(), _make_config())
+
+    assert len(result["downloaded_reports"]) == 1
+    assert result["downloaded_reports"][0]["name"] == "ReportA"
+
+
+def test_execute_downloads_yuanta_returns_list():
+    import json
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import execute_downloads_node
+
+    ia_err = json.dumps({"error": "no_results", "source": "investanchor"})
+    yuanta_list = json.dumps(
+        [
+            {"name": "報告A", "path": "/tmp/a_doc.json", "source": "yuanta"},
+            {"name": "報告B", "path": "/tmp/b_doc.json", "source": "yuanta"},
+        ]
+    )
+    state = _base_state(download_queries={"investanchor": None, "yuanta": "AI"})
+    with (
+        patch("subagent.auth_source_search.download_investanchor_report", return_value=ia_err),
+        patch("subagent.auth_source_search.download_yuanta_report", return_value=yuanta_list),
+    ):
+        result = execute_downloads_node(state, _make_config())
+
+    assert len(result["downloaded_reports"]) == 2
+
+
+def test_execute_downloads_dedup_skips_existing():
+    import json
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import execute_downloads_node
+
+    existing = [{"name": "ReportA", "path": "/tmp/a.json", "source": "investanchor"}]
+    fake = json.dumps({"name": "ReportA", "path": "/tmp/a.json", "source": "investanchor"})
+    with (
+        patch("subagent.auth_source_search.download_investanchor_report", return_value=fake),
+        patch(
+            "subagent.auth_source_search.download_yuanta_report",
+            return_value=json.dumps({"error": "no_results", "source": "yuanta"}),
+        ),
+    ):
+        result = execute_downloads_node(_base_state(downloaded_reports=existing), _make_config())
+
+    assert len(result["downloaded_reports"]) == 1
+
+
+def test_execute_downloads_passes_converter_and_run_dir():
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from subagent.auth_source_search import execute_downloads_node
+
+    mock_converter = MagicMock()
+    yuanta_result = json.dumps([{"name": "R", "path": "/p.json", "source": "yuanta"}])
+    state = _base_state(download_queries={"investanchor": None, "yuanta": "AI"})
+
+    with patch("subagent.auth_source_search.download_yuanta_report", return_value=yuanta_result) as mock_fn:
+        execute_downloads_node(state, _make_config(shared_pdf_converter=mock_converter, run_dir="/tmp/my_run"))
+
+    mock_fn.assert_called_once()
+    _, kwargs = mock_fn.call_args
+    assert kwargs.get("_converter") is mock_converter
+    assert kwargs.get("_run_dir") == "/tmp/my_run"
+
+
+def test_execute_downloads_skips_none_query():
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import execute_downloads_node
+
+    state = _base_state(download_queries={"investanchor": None, "yuanta": None})
+    with (
+        patch("subagent.auth_source_search.download_investanchor_report") as mock_ia,
+        patch("subagent.auth_source_search.download_yuanta_report") as mock_yn,
+    ):
+        execute_downloads_node(state, _make_config())
+
+    mock_ia.assert_not_called()
+    mock_yn.assert_not_called()
