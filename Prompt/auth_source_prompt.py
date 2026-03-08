@@ -28,7 +28,7 @@ of sub-goals already addressed.
 
 Rules:
 1. Choose a sub-goal that covers ground NOT already in the accumulated answer.
-2. The sub-goal must be answerable from institutional reports (InvestAnchor, Yunta).
+2. The sub-goal must be answerable from institutional reports (InvestAnchor, Yuanta).
 3. Be specific: include company name, metric, and time period when relevant.
 4. Output ONLY via the sub_goal_formatter tool.
 """
