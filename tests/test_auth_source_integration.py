@@ -30,7 +30,7 @@ def _llm_dispatcher(model, backup, prompt, *, tool=None, tool_choice=None):
     if "sub_goal_formatter" in tool_names:
         return _make_llm_response("sub_goal_formatter", sub_goal="台積電 N3 良率 2024")
     if "download_queries_formatter" in tool_names:
-        return _make_llm_response("download_queries_formatter", investanchor="台積電 N3", yuanta=None)
+        return _make_llm_response("download_queries_formatter", provider_a="台積電 N3", provider_b=None)
     if "reflect_download_formatter" in tool_names:
         return _make_llm_response("reflect_download_formatter", grade="pass", download_weakness="")
     if "reflect_qa_formatter" in tool_names:
@@ -44,7 +44,7 @@ def _llm_dispatcher(model, backup, prompt, *, tool=None, tool_choice=None):
     return MagicMock()
 
 
-def _make_fake_investanchor_result(tmp_path, name="MockReport"):
+def _make_fake_provider_a_result(tmp_path, name="MockReport"):
     """Create a minimal BaseReaderDocument JSON file and return the download result string."""
     from langchain_core.documents import Document
 
@@ -58,7 +58,7 @@ def _make_fake_investanchor_result(tmp_path, name="MockReport"):
     )
     path = str(tmp_path / f"{name}.json")
     doc.save(path)
-    return json.dumps({"name": name, "path": path, "source": "investanchor"})
+    return json.dumps({"name": name, "path": path, "source": "provider_a"})
 
 
 def _run_graph(
@@ -114,16 +114,16 @@ def _run_graph(
             "run_dir": run_dir,
         }
     }
-    default_ia = ia_fn or (lambda q, **kw: json.dumps({"error": "not_implemented", "source": "investanchor"}))
+    default_ia = ia_fn or (lambda q, **kw: json.dumps({"error": "not_implemented", "source": "provider_a"}))
 
     with (
         patch.object(asc, "call_llm", side_effect=llm_fn or _llm_dispatcher),
         patch.object(asc, "build_document_qa_graph", return_value=fake_qa_graph),
-        patch.object(asc, "download_investanchor_report", side_effect=default_ia),
+        patch.object(asc, "download_provider_a_report", side_effect=default_ia),
         patch.object(
             asc,
-            "download_yuanta_report",
-            side_effect=lambda q, **kw: json.dumps({"error": "no_results", "source": "yuanta"}),
+            "download_provider_b_report",
+            side_effect=lambda q, **kw: json.dumps({"error": "no_results", "source": "provider_b"}),
         ),
     ):
         return asyncio.run(graph.ainvoke(initial_state, config))
@@ -140,7 +140,7 @@ class TestAuthSourceGraphIntegration:
         """Full graph with valid downloads produces a non-empty answer."""
         result = _run_graph(
             tmp_path=tmp_path,
-            ia_fn=lambda q, **kw: _make_fake_investanchor_result(tmp_path),
+            ia_fn=lambda q, **kw: _make_fake_provider_a_result(tmp_path),
             qa_answer="台積電N3良率達到業界水準。",
         )
         assert result["answer"] != ""
@@ -150,7 +150,7 @@ class TestAuthSourceGraphIntegration:
         """All downloads fail -> qa_agent runs with empty file list; no exception raised."""
         result = _run_graph(
             tmp_path=tmp_path,
-            ia_fn=lambda q, **kw: json.dumps({"error": "connection_failed", "source": "investanchor"}),
+            ia_fn=lambda q, **kw: json.dumps({"error": "connection_failed", "source": "provider_a"}),
             qa_answer="",
         )
         assert result["pair_count"] == 1
@@ -171,7 +171,7 @@ class TestAuthSourceGraphIntegration:
         result = _run_graph(
             tmp_path=tmp_path,
             initial_overrides={"max_download_reflections": 2},
-            ia_fn=lambda q, **kw: _make_fake_investanchor_result(tmp_path),
+            ia_fn=lambda q, **kw: _make_fake_provider_a_result(tmp_path),
             llm_fn=llm_retry,
             qa_answer="答案在此",
         )
@@ -192,7 +192,7 @@ class TestAuthSourceGraphIntegration:
         result = _run_graph(
             tmp_path=tmp_path,
             initial_overrides={"max_pairs": 2},
-            ia_fn=lambda q, **kw: _make_fake_investanchor_result(tmp_path),
+            ia_fn=lambda q, **kw: _make_fake_provider_a_result(tmp_path),
             llm_fn=always_fail_outer,
             qa_answer="部分答案",
         )
@@ -204,14 +204,14 @@ class TestAuthSourceGraphIntegration:
         _run_graph(
             tmp_path=tmp_path,
             initial_overrides={"navigator_state_path": nav_path},
-            ia_fn=lambda q, **kw: _make_fake_investanchor_result(tmp_path),
+            ia_fn=lambda q, **kw: _make_fake_provider_a_result(tmp_path),
             qa_answer="答案在此",
         )
         assert os.path.exists(nav_path)
 
     def test_cookie_not_set_both_sources_no_crash(self, tmp_path):
         """Both tools return cookie_not_set; graph completes without raising."""
-        ia_no_cookie = json.dumps({"error": "cookie_not_set", "source": "investanchor"})
+        ia_no_cookie = json.dumps({"error": "cookie_not_set", "source": "provider_a"})
         result = _run_graph(
             tmp_path=tmp_path,
             ia_fn=lambda q, **kw: ia_no_cookie,

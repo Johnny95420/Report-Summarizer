@@ -1,7 +1,7 @@
 """LLM formatter tools and download functions for auth_source_search.
 
 Downloads call the stock_agent_tools HTTP server (STOCK_TOOLS_HOST:STOCK_TOOLS_PORT).
-Auth is cookie-based: INVESTANCHOR_COOKIE and YUANTA_COOKIES env vars.
+Auth is cookie-based: PROVIDER_A_COOKIE and PROVIDER_B_COOKIES env vars.
 
 File strategy: two-layer directory.
   - Global cache: reader_tmp/ (persistent across runs)
@@ -61,14 +61,14 @@ def sub_goal_formatter(sub_goal: str) -> str:
 
 @tool
 def download_queries_formatter(
-    investanchor: str | None,
-    yuanta: str | None,
+    provider_a: str | None,
+    provider_b: str | None,
 ) -> str:
-    """Output keyword search queries for InvestAnchor and Yuanta downloads.
+    """Output keyword search queries for Provider A and Provider B downloads.
 
     Set a source to null if it is not relevant for this sub-goal.
     """
-    return json.dumps({"investanchor": investanchor, "yuanta": yuanta})
+    return json.dumps({"provider_a": provider_a, "provider_b": provider_b})
 
 
 @tool
@@ -127,36 +127,36 @@ def outer_reflect_formatter(grade: Literal["pass", "fail"], hint: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def download_investanchor_report(
+def download_provider_a_report(
     query: str,
     max_results: int = 5,
-    _cookie_provider=lambda: os.environ.get("INVESTANCHOR_COOKIE", ""),
+    _cookie_provider=lambda: os.environ.get("PROVIDER_A_COOKIE", ""),
     _run_dir: str | None = None,
 ) -> str:
-    """Search InvestAnchor and save articles as a BaseReaderDocument JSON file.
+    """Search Provider A and save articles as a BaseReaderDocument JSON file.
 
-    Returns JSON string {"name": str, "path": str, "source": "investanchor"} on success.
-    Returns JSON string {"error": str, "source": "investanchor"} on failure.
+    Returns JSON string {"name": str, "path": str, "source": "provider_a"} on success.
+    Returns JSON string {"error": str, "source": "provider_a"} on failure.
     """
     # Strip spaces: both APIs use substring matching on titles, spaces break matching.
     query = query.replace(" ", "")
 
     cookie = _cookie_provider()
     if not cookie:
-        logger.warning("INVESTANCHOR_COOKIE is not set")
-        return json.dumps({"error": "cookie_not_set", "source": "investanchor"})
+        logger.warning("PROVIDER_A_COOKIE is not set")
+        return json.dumps({"error": "cookie_not_set", "source": "provider_a"})
 
     # Deterministic naming -- same query always produces same filename
-    doc_name = f"investanchor_{sanitize_name(query)}"
+    doc_name = f"provider_a_{sanitize_name(query)}"
     global_dir = Path(_READER_TMP_DIR)
     global_dir.mkdir(parents=True, exist_ok=True)
     global_path = str(global_dir / f"{doc_name}.json")
 
     # L1 cache check: skip HTTP if global cache file already exists
     if os.path.exists(global_path):
-        logger.info("Cache hit for InvestAnchor report: %s", query)
+        logger.info("Cache hit for Provider A report: %s", query)
         path = _ensure_symlink(global_path, _run_dir) if _run_dir else global_path
-        return json.dumps({"name": doc_name, "path": path, "source": "investanchor"})
+        return json.dumps({"name": doc_name, "path": path, "source": "provider_a"})
 
     try:
         resp = http_session.get(
@@ -169,8 +169,8 @@ def download_investanchor_report(
         data = resp.json()
 
         if not data.get("success") or not data.get("data"):
-            logger.warning("InvestAnchor returned no results for query: %s", query)
-            return json.dumps({"error": "no_results", "source": "investanchor"})
+            logger.warning("Provider A returned no results for query: %s", query)
+            return json.dumps({"error": "no_results", "source": "provider_a"})
 
         pages = []
         for article in data["data"]:
@@ -180,7 +180,7 @@ def download_investanchor_report(
                 f"**URL:** {article.get('url', '')}\n\n"
                 f"{article.get('content', '')}"
             )
-            pages.append(Document(page_content=text, metadata={"source": "investanchor"}))
+            pages.append(Document(page_content=text, metadata={"source": "provider_a"}))
 
         doc = BaseReaderDocument(date=None, name=doc_name, outlines=[], pages=pages)
         doc.save(global_path)
@@ -188,21 +188,21 @@ def download_investanchor_report(
         # Symlink into per-run dir
         path = _ensure_symlink(global_path, _run_dir) if _run_dir else global_path
 
-        return json.dumps({"name": doc_name, "path": path, "source": "investanchor"})
+        return json.dumps({"name": doc_name, "path": path, "source": "provider_a"})
 
     except Exception as e:
-        logger.error("InvestAnchor API error: %s", e)
-        return json.dumps({"error": str(e), "source": "investanchor"})
+        logger.error("Provider A API error: %s", e)
+        return json.dumps({"error": str(e), "source": "provider_a"})
 
 
-def download_yuanta_report(
+def download_provider_b_report(
     query: str,
     max_results: int = 5,
-    _cookie_provider=lambda: os.environ.get("YUANTA_COOKIES", ""),
+    _cookie_provider=lambda: os.environ.get("PROVIDER_B_COOKIES", ""),
     _converter=None,
     _run_dir: str | None = None,
 ) -> str:
-    """Search Yuanta, download PDFs, and process them into PDFReaderDocument JSON files.
+    """Search Provider B, download PDFs, and process them into PDFReaderDocument JSON files.
 
     Pipeline per report:
     1. Cache check: reader_tmp/{sanitize_name(title_date)}_doc.json -> skip if exists
@@ -218,13 +218,13 @@ def download_yuanta_report(
 
     from Tools.document_preprocessors import PDFDocumentPreprocessor
 
-    # Strip spaces: Yuanta API uses substring matching on titles, spaces break matching.
+    # Strip spaces: Provider B API uses substring matching on titles, spaces break matching.
     query = query.replace(" ", "")
 
     cookie = _cookie_provider()
     if not cookie:
-        logger.warning("YUANTA_COOKIES is not set")
-        return json.dumps({"error": "cookie_not_set", "source": "yuanta"})
+        logger.warning("PROVIDER_B_COOKIES is not set")
+        return json.dumps({"error": "cookie_not_set", "source": "provider_b"})
 
     try:
         resp = http_session.post(
@@ -237,8 +237,8 @@ def download_yuanta_report(
         data = resp.json()
 
         if not data.get("success") or not data.get("data"):
-            logger.warning("Yuanta returned no results for query: %s", query)
-            return json.dumps({"error": "no_results", "source": "yuanta"})
+            logger.warning("Provider B returned no results for query: %s", query)
+            return json.dumps({"error": "no_results", "source": "provider_b"})
 
         reader_tmp = Path(_READER_TMP_DIR)
         reader_tmp.mkdir(parents=True, exist_ok=True)
@@ -264,17 +264,17 @@ def download_yuanta_report(
 
             # L1 cache check: skip if _doc.json already exists in global cache
             if os.path.exists(global_cache_path):
-                logger.info("Cache hit for Yuanta report: %s", title)
+                logger.info("Cache hit for Provider B report: %s", title)
                 path = _ensure_symlink(global_cache_path, _run_dir) if _run_dir else global_cache_path
-                results.append({"name": title, "path": path, "source": "yuanta"})
+                results.append({"name": title, "path": path, "source": "provider_b"})
                 continue
 
             if not pdf_path or pdf_error:
-                logger.warning("Yuanta report '%s' has no PDF: %s", title, pdf_error)
+                logger.warning("Provider B report '%s' has no PDF: %s", title, pdf_error)
                 continue
 
             if not os.path.exists(pdf_path):
-                logger.warning("Yuanta PDF not found at path: %s", pdf_path)
+                logger.warning("Provider B PDF not found at path: %s", pdf_path)
                 continue
 
             # Process PDF through full pipeline
@@ -296,17 +296,17 @@ def download_yuanta_report(
 
                     # Symlink into per-run dir
                     path = _ensure_symlink(doc_path, _run_dir) if _run_dir else doc_path
-                    results.append({"name": title, "path": path, "source": "yuanta"})
+                    results.append({"name": title, "path": path, "source": "provider_b"})
 
             except Exception as e:
-                logger.warning("Failed to process Yuanta PDF '%s': %s", title, e)
+                logger.warning("Failed to process Provider B PDF '%s': %s", title, e)
                 continue
 
         if not results:
-            return json.dumps({"error": "all_processing_failed", "source": "yuanta"})
+            return json.dumps({"error": "all_processing_failed", "source": "provider_b"})
 
         return json.dumps(results)
 
     except Exception as e:
-        logger.error("Yuanta API error: %s", e)
-        return json.dumps({"error": str(e), "source": "yuanta"})
+        logger.error("Provider B API error: %s", e)
+        return json.dumps({"error": str(e), "source": "provider_b"})

@@ -105,43 +105,43 @@ def test_document_selection_formatter_returns_json_list():
 def test_download_tools_have_required_params():
     import inspect
 
-    from Tools.auth_source_tools import download_investanchor_report, download_yuanta_report
+    from Tools.auth_source_tools import download_provider_a_report, download_provider_b_report
 
-    for fn in (download_investanchor_report, download_yuanta_report):
+    for fn in (download_provider_a_report, download_provider_b_report):
         params = inspect.signature(fn).parameters
         assert "_cookie_provider" in params, f"{fn.__name__} missing _cookie_provider"
         assert "_run_dir" in params, f"{fn.__name__} missing _run_dir"
 
-    yuanta_params = inspect.signature(download_yuanta_report).parameters
-    assert "_converter" in yuanta_params, "download_yuanta_report missing _converter"
+    provider_b_params = inspect.signature(download_provider_b_report).parameters
+    assert "_converter" in provider_b_params, "download_provider_b_report missing _converter"
 
 
-def test_download_investanchor_no_cookie_returns_error():
+def test_download_provider_a_no_cookie_returns_error():
     import json
 
-    from Tools.auth_source_tools import download_investanchor_report
+    from Tools.auth_source_tools import download_provider_a_report
 
-    result = json.loads(download_investanchor_report("test query", _cookie_provider=lambda: ""))
+    result = json.loads(download_provider_a_report("test query", _cookie_provider=lambda: ""))
     assert result["error"] == "cookie_not_set"
-    assert result["source"] == "investanchor"
+    assert result["source"] == "provider_a"
 
 
-def test_download_yuanta_no_cookie_returns_error():
+def test_download_provider_b_no_cookie_returns_error():
     import json
 
-    from Tools.auth_source_tools import download_yuanta_report
+    from Tools.auth_source_tools import download_provider_b_report
 
-    result = json.loads(download_yuanta_report("test query", _cookie_provider=lambda: ""))
+    result = json.loads(download_provider_b_report("test query", _cookie_provider=lambda: ""))
     assert result["error"] == "cookie_not_set"
-    assert result["source"] == "yuanta"
+    assert result["source"] == "provider_b"
 
 
-def test_download_yuanta_cache_hit_skips_processing(tmp_path):
+def test_download_provider_b_cache_hit_skips_processing(tmp_path):
     """When _doc.json already exists for a report title+date, skip PDF processing entirely."""
     import json
     from unittest.mock import MagicMock, patch
 
-    from Tools.auth_source_tools import download_yuanta_report
+    from Tools.auth_source_tools import download_provider_b_report
     from Tools.reader_models import sanitize_name
 
     title = "AI伺服器供應鏈分析"
@@ -171,7 +171,7 @@ def test_download_yuanta_cache_hit_skips_processing(tmp_path):
         patch("Tools.auth_source_tools._READER_TMP_DIR", str(tmp_path)),
     ):
         result = json.loads(
-            download_yuanta_report(
+            download_provider_b_report(
                 "AI",
                 _cookie_provider=lambda: "cookie_val",
                 _run_dir=str(run_dir),
@@ -180,19 +180,19 @@ def test_download_yuanta_cache_hit_skips_processing(tmp_path):
 
     assert isinstance(result, list)
     assert len(result) == 1
-    assert result[0]["source"] == "yuanta"
+    assert result[0]["source"] == "provider_b"
     # path should be a symlink in run_dir
     from pathlib import Path
 
     assert Path(result[0]["path"]).parent == run_dir
 
 
-def test_download_investanchor_deterministic_naming(tmp_path):
-    """InvestAnchor uses deterministic filename, not UUID."""
+def test_download_provider_a_deterministic_naming(tmp_path):
+    """Provider A uses deterministic filename, not UUID."""
     import json
     from unittest.mock import MagicMock, patch
 
-    from Tools.auth_source_tools import download_investanchor_report
+    from Tools.auth_source_tools import download_provider_a_report
 
     run_dir = tmp_path / "run_test"
     run_dir.mkdir()
@@ -214,7 +214,7 @@ def test_download_investanchor_deterministic_naming(tmp_path):
         patch("Tools.auth_source_tools._READER_TMP_DIR", str(tmp_path)),
     ):
         result1 = json.loads(
-            download_investanchor_report(
+            download_provider_a_report(
                 "光通訊",
                 _cookie_provider=lambda: "cookie_val",
                 _run_dir=str(run_dir),
@@ -230,7 +230,7 @@ def test_download_investanchor_deterministic_naming(tmp_path):
         patch("Tools.auth_source_tools._READER_TMP_DIR", str(tmp_path)),
     ):
         result2 = json.loads(
-            download_investanchor_report(
+            download_provider_a_report(
                 "光通訊",
                 _cookie_provider=lambda: "cookie_val",
                 _run_dir=str(run_dir),
@@ -403,7 +403,7 @@ def _base_state(**overrides):
         "qa_budget": 10,
         "sub_goal": "Test sub-goal",
         "sub_goal_history": [],
-        "download_queries": {"investanchor": "台積電 2024", "yuanta": None},
+        "download_queries": {"provider_a": "台積電 2024", "provider_b": None},
         "download_weakness": "",
         "download_reflection_count": 0,
         "downloaded_reports": [],
@@ -431,12 +431,12 @@ def test_execute_downloads_adds_new_report():
 
     from subagent.auth_source_search import execute_downloads_node
 
-    fake = json.dumps({"name": "ReportA", "path": "/tmp/a.json", "source": "investanchor"})
+    fake = json.dumps({"name": "ReportA", "path": "/tmp/a.json", "source": "provider_a"})
     with (
-        patch("subagent.auth_source_search.download_investanchor_report", return_value=fake),
+        patch("subagent.auth_source_search.download_provider_a_report", return_value=fake),
         patch(
-            "subagent.auth_source_search.download_yuanta_report",
-            return_value=json.dumps({"error": "no_results", "source": "yuanta"}),
+            "subagent.auth_source_search.download_provider_b_report",
+            return_value=json.dumps({"error": "no_results", "source": "provider_b"}),
         ),
     ):
         result = execute_downloads_node(_base_state(), _make_config())
@@ -445,24 +445,24 @@ def test_execute_downloads_adds_new_report():
     assert result["downloaded_reports"][0]["name"] == "ReportA"
 
 
-@pytest.mark.skip(reason="Yuanta download disabled while PDF conversion service is being decoupled")
-def test_execute_downloads_yuanta_returns_list():
+@pytest.mark.skip(reason="Provider B download disabled while PDF conversion service is being decoupled")
+def test_execute_downloads_provider_b_returns_list():
     import json
     from unittest.mock import patch
 
     from subagent.auth_source_search import execute_downloads_node
 
-    ia_err = json.dumps({"error": "no_results", "source": "investanchor"})
-    yuanta_list = json.dumps(
+    pa_err = json.dumps({"error": "no_results", "source": "provider_a"})
+    pb_list = json.dumps(
         [
-            {"name": "報告A", "path": "/tmp/a_doc.json", "source": "yuanta"},
-            {"name": "報告B", "path": "/tmp/b_doc.json", "source": "yuanta"},
+            {"name": "報告A", "path": "/tmp/a_doc.json", "source": "provider_b"},
+            {"name": "報告B", "path": "/tmp/b_doc.json", "source": "provider_b"},
         ]
     )
-    state = _base_state(download_queries={"investanchor": None, "yuanta": "AI"})
+    state = _base_state(download_queries={"provider_a": None, "provider_b": "AI"})
     with (
-        patch("subagent.auth_source_search.download_investanchor_report", return_value=ia_err),
-        patch("subagent.auth_source_search.download_yuanta_report", return_value=yuanta_list),
+        patch("subagent.auth_source_search.download_provider_a_report", return_value=pa_err),
+        patch("subagent.auth_source_search.download_provider_b_report", return_value=pb_list),
     ):
         result = execute_downloads_node(state, _make_config())
 
@@ -475,13 +475,13 @@ def test_execute_downloads_dedup_skips_existing():
 
     from subagent.auth_source_search import execute_downloads_node
 
-    existing = [{"name": "ReportA", "path": "/tmp/a.json", "source": "investanchor"}]
-    fake = json.dumps({"name": "ReportA", "path": "/tmp/a.json", "source": "investanchor"})
+    existing = [{"name": "ReportA", "path": "/tmp/a.json", "source": "provider_a"}]
+    fake = json.dumps({"name": "ReportA", "path": "/tmp/a.json", "source": "provider_a"})
     with (
-        patch("subagent.auth_source_search.download_investanchor_report", return_value=fake),
+        patch("subagent.auth_source_search.download_provider_a_report", return_value=fake),
         patch(
-            "subagent.auth_source_search.download_yuanta_report",
-            return_value=json.dumps({"error": "no_results", "source": "yuanta"}),
+            "subagent.auth_source_search.download_provider_b_report",
+            return_value=json.dumps({"error": "no_results", "source": "provider_b"}),
         ),
     ):
         result = execute_downloads_node(_base_state(downloaded_reports=existing), _make_config())
@@ -489,7 +489,7 @@ def test_execute_downloads_dedup_skips_existing():
     assert len(result["downloaded_reports"]) == 1
 
 
-@pytest.mark.skip(reason="Yuanta download disabled while PDF conversion service is being decoupled")
+@pytest.mark.skip(reason="Provider B download disabled while PDF conversion service is being decoupled")
 def test_execute_downloads_passes_converter_and_run_dir():
     import json
     from unittest.mock import MagicMock, patch
@@ -497,10 +497,10 @@ def test_execute_downloads_passes_converter_and_run_dir():
     from subagent.auth_source_search import execute_downloads_node
 
     mock_converter = MagicMock()
-    yuanta_result = json.dumps([{"name": "R", "path": "/p.json", "source": "yuanta"}])
-    state = _base_state(download_queries={"investanchor": None, "yuanta": "AI"})
+    pb_result = json.dumps([{"name": "R", "path": "/p.json", "source": "provider_b"}])
+    state = _base_state(download_queries={"provider_a": None, "provider_b": "AI"})
 
-    with patch("subagent.auth_source_search.download_yuanta_report", return_value=yuanta_result) as mock_fn:
+    with patch("subagent.auth_source_search.download_provider_b_report", return_value=pb_result) as mock_fn:
         execute_downloads_node(state, _make_config(shared_pdf_converter=mock_converter, run_dir="/tmp/my_run"))
 
     mock_fn.assert_called_once()
@@ -514,15 +514,15 @@ def test_execute_downloads_skips_none_query():
 
     from subagent.auth_source_search import execute_downloads_node
 
-    state = _base_state(download_queries={"investanchor": None, "yuanta": None})
+    state = _base_state(download_queries={"provider_a": None, "provider_b": None})
     with (
-        patch("subagent.auth_source_search.download_investanchor_report") as mock_ia,
-        patch("subagent.auth_source_search.download_yuanta_report") as mock_yn,
+        patch("subagent.auth_source_search.download_provider_a_report") as mock_pa,
+        patch("subagent.auth_source_search.download_provider_b_report") as mock_pb,
     ):
         execute_downloads_node(state, _make_config())
 
-    mock_ia.assert_not_called()
-    mock_yn.assert_not_called()
+    mock_pa.assert_not_called()
+    mock_pb.assert_not_called()
 
 
 def _make_llm_response(tool_name: str, **args):
@@ -580,12 +580,12 @@ def test_generate_download_queries_returns_dict():
 
     from subagent.auth_source_search import generate_download_queries_node
 
-    mock_resp = _make_llm_response("download_queries_formatter", investanchor="台積電 N3 2024", yuanta=None)
+    mock_resp = _make_llm_response("download_queries_formatter", provider_a="台積電 N3 2024", provider_b=None)
     with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
         result = generate_download_queries_node(_base_state())
 
-    assert result["download_queries"]["investanchor"] == "台積電 N3 2024"
-    assert result["download_queries"]["yuanta"] is None
+    assert result["download_queries"]["provider_a"] == "台積電 N3 2024"
+    assert result["download_queries"]["provider_b"] is None
 
 
 def test_generate_download_queries_includes_weakness_in_prompt():
@@ -599,7 +599,7 @@ def test_generate_download_queries_includes_weakness_in_prompt():
     def capture_call(model, backup, prompt, **kwargs):
         # prompt is a list of messages — serialize to check content
         captured["prompt"] = str(prompt)
-        return _make_llm_response("download_queries_formatter", investanchor="refined", yuanta=None)
+        return _make_llm_response("download_queries_formatter", provider_a="refined", provider_b=None)
 
     state = _base_state(download_weakness="前次搜尋缺少季度資料")
     with patch("subagent.auth_source_search.call_llm", side_effect=capture_call):
@@ -617,7 +617,7 @@ def test_reflect_download_pass_routes_to_qa_agent():
     from subagent.auth_source_search import reflect_download_node
 
     mock_resp = _make_llm_response("reflect_download_formatter", grade="pass", download_weakness="")
-    state = _base_state(downloaded_reports=[{"name": "R", "path": "/p.json", "source": "investanchor"}])
+    state = _base_state(downloaded_reports=[{"name": "R", "path": "/p.json", "source": "provider_a"}])
     with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
         cmd = reflect_download_node(state)
 
@@ -839,8 +839,8 @@ def test_qa_agent_selects_subset_of_documents():
     from subagent.auth_source_search import qa_agent_node
 
     reports = [
-        {"name": "ReportA", "path": "/a.json", "source": "investanchor"},
-        {"name": "ReportB", "path": "/b.json", "source": "yuanta"},
+        {"name": "ReportA", "path": "/a.json", "source": "provider_a"},
+        {"name": "ReportB", "path": "/b.json", "source": "provider_b"},
     ]
     fake_graph = MagicMock()
     fake_graph.invoke.return_value = {"answer": "分析結果"}
@@ -866,8 +866,8 @@ def test_qa_agent_retry_uses_all_documents():
     from subagent.auth_source_search import qa_agent_node
 
     reports = [
-        {"name": "ReportA", "path": "/a.json", "source": "investanchor"},
-        {"name": "ReportB", "path": "/b.json", "source": "yuanta"},
+        {"name": "ReportA", "path": "/a.json", "source": "provider_a"},
+        {"name": "ReportB", "path": "/b.json", "source": "provider_b"},
     ]
     fake_graph = MagicMock()
     fake_graph.invoke.return_value = {"answer": "補充答案"}
@@ -892,8 +892,8 @@ def test_qa_agent_selection_fallback_on_empty_llm():
     from subagent.auth_source_search import qa_agent_node
 
     reports = [
-        {"name": "ReportA", "path": "/a.json", "source": "investanchor"},
-        {"name": "ReportB", "path": "/b.json", "source": "yuanta"},
+        {"name": "ReportA", "path": "/a.json", "source": "provider_a"},
+        {"name": "ReportB", "path": "/b.json", "source": "provider_b"},
     ]
     fake_graph = MagicMock()
     fake_graph.invoke.return_value = {"answer": "答案"}
@@ -916,8 +916,8 @@ def test_qa_agent_selection_fallback_on_llm_error():
     from subagent.auth_source_search import qa_agent_node
 
     reports = [
-        {"name": "ReportA", "path": "/a.json", "source": "investanchor"},
-        {"name": "ReportB", "path": "/b.json", "source": "yuanta"},
+        {"name": "ReportA", "path": "/a.json", "source": "provider_a"},
+        {"name": "ReportB", "path": "/b.json", "source": "provider_b"},
     ]
     fake_graph = MagicMock()
     fake_graph.invoke.return_value = {"answer": "答案"}
@@ -944,7 +944,7 @@ def test_qa_agent_sanitizes_sentinel_answer():
     fake_graph.invoke.return_value = {"answer": "[Unable to extract answer from documents]"}
     config = {"configurable": {"shared_navigator": _make_nav()}}
 
-    reports = [{"name": "Doc", "path": "/doc.json", "source": "investanchor"}]
+    reports = [{"name": "Doc", "path": "/doc.json", "source": "provider_a"}]
     state = _base_state(downloaded_reports=reports)
     with (
         patch("subagent.auth_source_search.call_llm", return_value=_make_selection_response(["Doc"])),
@@ -966,7 +966,7 @@ def test_qa_agent_exception_returns_empty():
     fake_graph.invoke.side_effect = RuntimeError("Document QA crashed")
     config = {"configurable": {"shared_navigator": _make_nav()}}
 
-    reports = [{"name": "Doc", "path": "/doc.json", "source": "investanchor"}]
+    reports = [{"name": "Doc", "path": "/doc.json", "source": "provider_a"}]
     state = _base_state(downloaded_reports=reports)
     with (
         patch("subagent.auth_source_search.call_llm", return_value=_make_selection_response(["Doc"])),

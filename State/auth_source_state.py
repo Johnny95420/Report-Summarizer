@@ -18,7 +18,7 @@ class AuthReportState(TypedDict):
     sub_goal_history: Annotated[list, operator.add]
 
     # -- Download phase --
-    download_queries: dict  # {"investanchor": str | None, "yuanta": str | None}
+    download_queries: dict  # {"provider_a": str | None, "provider_b": str | None}
     download_weakness: str
     download_reflection_count: int
 

@@ -1,6 +1,6 @@
 """Auth Source Search LangGraph subagent.
 
-Downloads institutional reports (InvestAnchor, Yuanta) and answers research
+Downloads institutional reports (Provider A, Provider B) and answers research
 questions via Document QA with a shared AgentDocumentReader navigator.
 
 File strategy: two-layer directory.
@@ -37,9 +37,9 @@ from State.auth_source_state import AuthReportState
 from subagent.document_qa import build_document_qa_graph, submit_answer
 from Tools.auth_source_tools import (
     document_selection_formatter,
-    download_investanchor_report,
+    download_provider_a_report,
     download_queries_formatter,
-    download_yuanta_report,
+    download_provider_b_report,
     outer_reflect_formatter,
     reflect_download_formatter,
     reflect_qa_formatter,
@@ -121,7 +121,7 @@ def _restore_navigator_state(navigator, path: str) -> None:
 # execute_downloads node (Python -- no LLM)
 # ---------------------------------------------------------------------------
 def execute_downloads_node(state: AuthReportState, config: RunnableConfig) -> dict:
-    """Download reports from InvestAnchor and Yuanta based on generated queries.
+    """Download reports from Provider A and Provider B based on generated queries.
 
     Gets shared_pdf_converter and run_dir from config["configurable"].
     Deduplicates by (name, source). All API errors are logged and skipped.
@@ -139,36 +139,36 @@ def execute_downloads_node(state: AuthReportState, config: RunnableConfig) -> di
             new_reports.append(result)
             existing_keys.add(key)
 
-    # InvestAnchor: returns single {"name", "path", "source"} dict
-    if ia_query := download_queries.get("investanchor"):
+    # Provider A: returns single {"name", "path", "source"} dict
+    if ia_query := download_queries.get("provider_a"):
         try:
-            result_str = download_investanchor_report(ia_query, _run_dir=run_dir)
+            result_str = download_provider_a_report(ia_query, _run_dir=run_dir)
             result = json.loads(result_str)
             if "error" in result:
-                logger.warning("[execute_downloads] investanchor error: %s", result.get("error"))
+                logger.warning("[execute_downloads] provider_a error: %s", result.get("error"))
             else:
                 _add_if_new(result)
         except Exception as e:
-            logger.error("[execute_downloads] investanchor download failed: %s", e)
+            logger.error("[execute_downloads] provider_a download failed: %s", e)
 
-    # Yuanta: disabled — PDF conversion service not yet decoupled; GPU OOM in-process.
-    if False and (yuanta_query := download_queries.get("yuanta")):
+    # Provider B: disabled — PDF conversion service not yet decoupled; GPU OOM in-process.
+    if False and (pb_query := download_queries.get("provider_b")):
         try:
-            result_str = download_yuanta_report(
-                yuanta_query,
+            result_str = download_provider_b_report(
+                pb_query,
                 _converter=converter,
                 _run_dir=run_dir,
             )
             result = json.loads(result_str)
             if isinstance(result, dict) and "error" in result:
-                logger.warning("[execute_downloads] yuanta error: %s", result.get("error"))
+                logger.warning("[execute_downloads] provider_b error: %s", result.get("error"))
             elif isinstance(result, list):
                 for item in result:
                     _add_if_new(item)
             else:
                 _add_if_new(result)
         except Exception as e:
-            logger.error("[execute_downloads] yuanta download failed: %s", e)
+            logger.error("[execute_downloads] provider_b download failed: %s", e)
 
     return {"downloaded_reports": new_reports}
 
@@ -229,8 +229,8 @@ def generate_download_queries_node(state: AuthReportState) -> dict:
     args = response.tool_calls[0]["args"]
     return {
         "download_queries": {
-            "investanchor": args.get("investanchor"),
-            "yuanta": args.get("yuanta"),
+            "provider_a": args.get("provider_a"),
+            "provider_b": args.get("provider_b"),
         }
     }
 
