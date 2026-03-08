@@ -51,7 +51,7 @@ to retrieve relevant institutional reports.
 Rules:
 1. Generate SHORT keyword queries (3–8 words, e.g.: "台積電 N3 良率 2024 Q4").
 2. For InvestAnchor: focused on Taiwan stocks / macro research.
-3. For Yunta: focused on Taiwan equity / sector reports.
+3. For Yuanta: focused on Taiwan equity / sector reports.
 4. Set a source to null if it is clearly not relevant for this sub-goal.
 5. On retry: change the keywords to address the weakness described above.
 6. Output ONLY via the download_queries_formatter tool.
