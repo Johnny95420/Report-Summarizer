@@ -1,5 +1,6 @@
 """Unit tests for the auth_source_search subagent (grows across milestones)."""
 
+import pytest
 from unittest.mock import MagicMock, patch
 
 
@@ -396,6 +397,7 @@ def _base_state(**overrides):
     state = {
         "question": "Test question",
         "max_pairs": 3,
+        "min_pairs": 2,
         "max_download_reflections": 1,
         "max_qa_reflections": 1,
         "qa_budget": 10,
@@ -443,6 +445,7 @@ def test_execute_downloads_adds_new_report():
     assert result["downloaded_reports"][0]["name"] == "ReportA"
 
 
+@pytest.mark.skip(reason="Yuanta download disabled while PDF conversion service is being decoupled")
 def test_execute_downloads_yuanta_returns_list():
     import json
     from unittest.mock import patch
@@ -486,6 +489,7 @@ def test_execute_downloads_dedup_skips_existing():
     assert len(result["downloaded_reports"]) == 1
 
 
+@pytest.mark.skip(reason="Yuanta download disabled while PDF conversion service is being decoupled")
 def test_execute_downloads_passes_converter_and_run_dir():
     import json
     from unittest.mock import MagicMock, patch
@@ -702,11 +706,21 @@ def test_outer_reflect_pass_routes_to_end():
     from subagent.auth_source_search import outer_reflect_node
 
     mock_resp = _make_llm_response("outer_reflect_formatter", grade="pass", hint="")
-    state = _base_state(answer="完整答案在此", pair_count=1, max_pairs=3)
+    state = _base_state(answer="完整答案在此", pair_count=2, max_pairs=3)
     with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
         cmd = outer_reflect_node(state)
 
     assert cmd.goto == END
+
+
+def test_outer_reflect_below_min_pairs_routes_to_plan():
+    """When pair_count < min_pairs, always continue regardless of LLM grade."""
+    from subagent.auth_source_search import outer_reflect_node
+
+    # No LLM call needed — min_pairs short-circuits
+    state = _base_state(answer="完整答案在此", pair_count=1, min_pairs=2, max_pairs=3)
+    cmd = outer_reflect_node(state)
+    assert cmd.goto == "plan_sub_goal"
 
 
 def test_outer_reflect_fail_routes_to_plan_sub_goal():
@@ -715,7 +729,7 @@ def test_outer_reflect_fail_routes_to_plan_sub_goal():
     from subagent.auth_source_search import outer_reflect_node
 
     mock_resp = _make_llm_response("outer_reflect_formatter", grade="fail", hint="需研究競爭對手")
-    state = _base_state(answer="部分答案", pair_count=1, max_pairs=3)
+    state = _base_state(answer="部分答案", pair_count=2, max_pairs=3)
     with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
         cmd = outer_reflect_node(state)
 

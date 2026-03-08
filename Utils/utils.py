@@ -17,11 +17,28 @@ from tavily import TavilyClient
 from urllib3.util.retry import Retry
 
 from State.state import Section
-from langfuse import observe
-from Utils.langfuse_tracing import get_langfuse_callback
+from Utils.langfuse_tracing import get_langfuse_callback, observe
 
 _cfg = omegaconf.OmegaConf.load(Path(__file__).parent.parent / "report_config.yaml")
 _MAX_TOKENS: int = int(_cfg.get("MAX_TOKENS", 65536))
+
+# Models with lower max completion token limits than the global _MAX_TOKENS.
+# LiteLLM will reject requests exceeding the model's actual limit.
+_MODEL_MAX_OUTPUT_TOKENS: dict[str, int] = {
+    "gpt-4o": 16384,
+    "gpt-4o-mini": 16384,
+    "deepseek/deepseek-chat": 8192,
+    "deepseek/deepseek-reasoner": 8192,
+}
+
+
+def _cap_max_tokens(model_name: str) -> int:
+    """Return max_tokens capped to the model's known output limit."""
+    for prefix, limit in _MODEL_MAX_OUTPUT_TOKENS.items():
+        if model_name == prefix or model_name.startswith(f"{prefix}-"):
+            return min(_MAX_TOKENS, limit)
+    return _MAX_TOKENS
+
 
 tavily_client = TavilyClient()
 
@@ -35,7 +52,7 @@ def create_http_session():
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["HEAD", "GET", "POST"],
     )
-    adapter = HTTPAdapter(max_retries=retry_strategy)
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_maxsize=50)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
@@ -73,7 +90,7 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     primary = ChatLiteLLM(
         model=model_name,
         temperature=temperature,
-        max_tokens=_MAX_TOKENS,
+        max_tokens=_cap_max_tokens(model_name),
     )
 
     if tool:
@@ -96,7 +113,7 @@ def call_llm(model_name: str, backup_model_name: str, prompt: list, tool=None, t
     backup = ChatLiteLLM(
         model=backup_model_name,
         temperature=backup_temperature,
-        max_tokens=_MAX_TOKENS,
+        max_tokens=_cap_max_tokens(backup_model_name),
     )
     if tool:
         backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)
@@ -115,7 +132,7 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     primary = ChatLiteLLM(
         model=model_name,
         temperature=temperature,
-        max_tokens=_MAX_TOKENS,
+        max_tokens=_cap_max_tokens(model_name),
     )
 
     if tool:
@@ -138,7 +155,7 @@ async def call_llm_async(model_name: str, backup_model_name: str, prompt: list, 
     backup = ChatLiteLLM(
         model=backup_model_name,
         temperature=backup_temperature,
-        max_tokens=_MAX_TOKENS,
+        max_tokens=_cap_max_tokens(backup_model_name),
     )
     if tool:
         backup = backup.bind_tools(tools=tool, tool_choice=tool_choice)

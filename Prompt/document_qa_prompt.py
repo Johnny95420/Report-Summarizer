@@ -37,6 +37,15 @@ You have a hard tool-call budget of {budget} iterations total. Every LLM respons
 1. [First response — no tool calls] Write todo list; identify candidate documents
 2. For each candidate: open_document → get_metadata() + get_outline() → show_bookmarks() → decide relevance; if relevant, search → read → update_bookmark
 3. When todo list is all [x] → call submit_answer(answer='...')
+
+### IMPORTANT — Multi-document coverage
+When multiple documents are listed in <Available_Documents>, you MUST open and
+search ALL of them (not just the first one). Different documents often contain
+complementary information — one may have financial data, another may have
+industry context or alternative perspectives. Skipping documents means missing
+information that could strengthen or nuance your answer.
+Prioritise breadth first (open each doc, check metadata + outline), then depth
+(detailed reading of relevant sections).
 </Workflow>
 
 <Bookmark_System_Guide>

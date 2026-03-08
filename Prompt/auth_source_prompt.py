@@ -48,12 +48,35 @@ to retrieve relevant institutional reports.
 {download_weakness}
 </Previous Download Weakness>
 
+CRITICAL — Search API behaviour:
+  Both InvestAnchor and Yuanta use substring matching on report titles.
+  Spaces are NOT treated as separate tokens — the ENTIRE string is matched as-is.
+  Therefore: use a SINGLE keyword or a short concatenated phrase with NO spaces.
+
 Rules:
-1. Generate SHORT keyword queries (3–8 words, e.g.: "台積電 N3 良率 2024 Q4").
-2. For InvestAnchor: focused on Taiwan stocks / macro research.
-3. For Yuanta: focused on Taiwan equity / sector reports.
+1. Each query must be a single keyword or short phrase WITHOUT spaces.
+   - Good: "台積電", "半導體產業", "伺服器", "先進製程", "總經策略", "週報"
+   - Bad:  "台積電 先進製程" (space breaks substring match → zero hits)
+   - Bad:  "台積電 N3 良率 2024" (multiple words with spaces → zero hits)
+   - Pick the ONE most distinctive term that is likely to appear in report titles.
+2. InvestAnchor report title patterns (for reference):
+   - 週報: "台股產業週報 2026/3/8", "台股觀察週報 2025/12/14"
+   - 個股: "世界先進(5347)：營運簡評", "博通(AVGO)：財報電話會議摘要"
+   - 產業: "CoWoS先進封裝外溢至專業封測代工廠", "台積電資本支出創歷史新高"
+   - 總經: "2026年全球經濟展望報告", "FED無懼川普政治壓力"
+   - 主題: "NVIDIA推出Rubin CPX擴充卡", "雲端服務商加速投入自研AI ASIC"
+   → Best queries: company/ticker ("台積電", "NVIDIA", "ASML"), topic ("CoWoS", "先進封裝"),
+     or report type ("週報", "經濟展望"). Concatenated phrases work ("台積電資本支出").
+3. Yuanta report title patterns (for reference):
+   - 個股: "健策 (3653 TT)：…", "信驊 (5274 TT)：…"
+   - 產業: "半導體產業", "伺服器產業", "塑化產業", "手機產業"
+   - 總經: "企業債週報", "總經策略報告", "經濟數據評析", "國際金融市場焦點"
+   - 美股: "美股週報", "NVIDIA (NVDA US)", "AMD"
+   - ETF: "ETF週報"
+   → Best queries: company name ("台積電"), industry ("半導體"), or report type ("週報").
+   ⚠ Yuanta only matches single keywords — concatenated phrases usually fail.
 4. Set a source to null if it is clearly not relevant for this sub-goal.
-5. On retry: change the keywords to address the weakness described above.
+5. On retry: try a DIFFERENT single keyword (synonym, broader/narrower term).
 6. Output ONLY via the download_queries_formatter tool.
 """
 
@@ -147,7 +170,12 @@ document_selection_instruction = """You are selecting which research documents a
 {doc_summary}
 </Available Documents>
 
-Select the document names that are most likely to contain information relevant to
-the sub-goal. Include all documents if unsure.
+Inclusion policy — be GENEROUS:
+- Include any document that is even PARTIALLY or WEAKLY related to the sub-goal.
+- A document about the same company, industry, or macro topic counts as related.
+- When in doubt, INCLUDE the document. False positives are cheap (the QA agent
+  will skip irrelevant pages), but false negatives lose valuable information.
+- Only exclude documents that are clearly about a completely different topic.
+
 Output ONLY via the document_selection_formatter tool.
 """

@@ -25,10 +25,13 @@ def _utils_source():
 # ---------------------------------------------------------------------------
 
 class TestMaxTokensConfig:
-    """call_llm and call_llm_async must set max_tokens=_MAX_TOKENS on every ChatLiteLLM instance."""
+    """call_llm and call_llm_async must use _cap_max_tokens() on every ChatLiteLLM instance."""
 
     def _count_chatlitellm_max_tokens(self, func_node):
-        """Return the max_tokens values (constant or variable name) passed to ChatLiteLLM inside a function."""
+        """Return the max_tokens value representations passed to ChatLiteLLM inside a function.
+
+        Accepted forms: _MAX_TOKENS (Name) or _cap_max_tokens(...) (Call).
+        """
         values = []
         for node in ast.walk(func_node):
             if not isinstance(node, ast.Call):
@@ -44,7 +47,13 @@ class TestMaxTokensConfig:
                         values.append(kw.value.value)
                     elif isinstance(kw.value, ast.Name):
                         values.append(kw.value.id)
+                    elif isinstance(kw.value, ast.Call):
+                        call_name = (kw.value.func.id if isinstance(kw.value.func, ast.Name) else
+                                     kw.value.func.attr if isinstance(kw.value.func, ast.Attribute) else None)
+                        values.append(call_name)
         return values
+
+    _ALLOWED_MAX_TOKENS = {"_MAX_TOKENS", "_cap_max_tokens"}
 
     def test_call_llm_primary_max_tokens(self):
         tree = _parse_utils()
@@ -53,7 +62,7 @@ class TestMaxTokensConfig:
         values = self._count_chatlitellm_max_tokens(func)
         assert len(values) >= 2, f"Expected >=2 ChatLiteLLM instances in call_llm, got {len(values)}"
         for v in values:
-            assert v == "_MAX_TOKENS", f"ChatLiteLLM max_tokens should be _MAX_TOKENS, got {v}"
+            assert v in self._ALLOWED_MAX_TOKENS, f"ChatLiteLLM max_tokens should use _MAX_TOKENS or _cap_max_tokens, got {v}"
 
     def test_call_llm_async_max_tokens(self):
         tree = _parse_utils()
@@ -62,7 +71,7 @@ class TestMaxTokensConfig:
         values = self._count_chatlitellm_max_tokens(func)
         assert len(values) >= 2, f"Expected >=2 ChatLiteLLM instances in call_llm_async, got {len(values)}"
         for v in values:
-            assert v == "_MAX_TOKENS", f"ChatLiteLLM max_tokens should be _MAX_TOKENS, got {v}"
+            assert v in self._ALLOWED_MAX_TOKENS, f"ChatLiteLLM max_tokens should use _MAX_TOKENS or _cap_max_tokens, got {v}"
 
     def test_max_tokens_loaded_from_config(self):
         source = _utils_source()

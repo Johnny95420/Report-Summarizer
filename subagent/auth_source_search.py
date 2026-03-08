@@ -46,6 +46,7 @@ from Tools.auth_source_tools import (
     sub_goal_formatter,
     synthesis_formatter,
 )
+from Utils.langfuse_tracing import langfuse_node, observe, traced_thread
 from Utils.utils import call_llm
 
 _HERE = pathlib.Path(__file__).parent.parent
@@ -150,8 +151,8 @@ def execute_downloads_node(state: AuthReportState, config: RunnableConfig) -> di
         except Exception as e:
             logger.error("[execute_downloads] investanchor download failed: %s", e)
 
-    # Yuanta: returns list of {"name", "path", "source"} dicts (or error dict)
-    if yuanta_query := download_queries.get("yuanta"):
+    # Yuanta: disabled — PDF conversion service not yet decoupled; GPU OOM in-process.
+    if False and (yuanta_query := download_queries.get("yuanta")):
         try:
             result_str = download_yuanta_report(
                 yuanta_query,
@@ -322,10 +323,16 @@ def outer_reflect_node(state: AuthReportState) -> Command:
     """Grade whether the main question is fully answered; loop back or END."""
     pair_count = state.get("pair_count", 0)
     max_pairs = state.get("max_pairs", 3)
+    min_pairs = state.get("min_pairs", 2)
 
     if pair_count >= max_pairs:
         logger.info("[outer_reflect] max_pairs=%d reached, ending", max_pairs)
         return Command(goto=END)
+
+    # Force more research rounds until min_pairs is reached
+    if pair_count < min_pairs:
+        logger.info("[outer_reflect] pair_count=%d < min_pairs=%d, continuing", pair_count, min_pairs)
+        return Command(goto="plan_sub_goal")
 
     system_instruction = outer_reflect_instruction.format(
         question=state["question"],
@@ -482,7 +489,7 @@ async def qa_agent_node(state: AuthReportState, config: RunnableConfig) -> dict:
         }
         invoke_config = {"configurable": {"tools": all_tools}}
 
-        result = await asyncio.to_thread(graph.invoke, initial_state, invoke_config)
+        result = await traced_thread(graph.invoke, initial_state, invoke_config)
         raw_answer = result.get("answer", "")
     except Exception as e:
         logger.error("[qa_agent] Document QA failed: %s", e)
@@ -502,14 +509,14 @@ def build_auth_source_graph():
     """Build and compile the auth source search StateGraph."""
     graph = StateGraph(AuthReportState)
 
-    graph.add_node("plan_sub_goal", plan_sub_goal_node)
-    graph.add_node("generate_download_queries", generate_download_queries_node)
-    graph.add_node("execute_downloads", execute_downloads_node)
-    graph.add_node("reflect_download", reflect_download_node)
-    graph.add_node("qa_agent", qa_agent_node)
-    graph.add_node("reflect_qa", reflect_qa_node)
-    graph.add_node("synthesize_pair_answer", synthesize_pair_answer_node)
-    graph.add_node("outer_reflect", outer_reflect_node)
+    graph.add_node("plan_sub_goal", langfuse_node(plan_sub_goal_node))
+    graph.add_node("generate_download_queries", langfuse_node(generate_download_queries_node))
+    graph.add_node("execute_downloads", langfuse_node(execute_downloads_node))
+    graph.add_node("reflect_download", langfuse_node(reflect_download_node))
+    graph.add_node("qa_agent", langfuse_node(qa_agent_node))
+    graph.add_node("reflect_qa", langfuse_node(reflect_qa_node))
+    graph.add_node("synthesize_pair_answer", langfuse_node(synthesize_pair_answer_node))
+    graph.add_node("outer_reflect", langfuse_node(outer_reflect_node))
 
     graph.set_entry_point("plan_sub_goal")
     graph.add_edge("plan_sub_goal", "generate_download_queries")
@@ -534,6 +541,7 @@ auth_source_graph = build_auth_source_graph()
 async def run_auth_source_search(
     question: str,
     max_pairs: int = 3,
+    min_pairs: int = 2,
     max_download_reflections: int = 1,
     max_qa_reflections: int = 1,
     qa_budget: int = 30,
@@ -572,6 +580,7 @@ async def run_auth_source_search(
     initial_state: dict = {
         "question": question,
         "max_pairs": max_pairs,
+        "min_pairs": min_pairs,
         "max_download_reflections": max_download_reflections,
         "max_qa_reflections": max_qa_reflections,
         "qa_budget": qa_budget,
@@ -610,3 +619,144 @@ async def run_auth_source_search(
     if not answer or not answer.strip():
         return _NO_ANSWER_SENTINEL
     return answer
+
+
+# ---------------------------------------------------------------------------
+# __main__ — standalone test runner
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import sys
+    import time
+
+    from dotenv import load_dotenv
+
+    load_dotenv(override=True)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(name)-14s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    for _log_name in ("AuthSourceSearch", "AuthSourceTools", "DocumentQA", "TextNavigator"):
+        logging.getLogger(_log_name).setLevel(logging.INFO)
+    logging.getLogger("TextNavigator").setLevel(logging.WARNING)
+
+    _DEFAULT_QUESTION = "台積電 2025 年先進製程（N3、N2）的產能規劃與客戶結構分析"
+    question = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else _DEFAULT_QUESTION
+
+    # Optional CLI args: max_pairs, qa_budget
+    max_pairs = int(sys.argv[2]) if len(sys.argv) > 2 else 3
+    qa_budget = int(sys.argv[3]) if len(sys.argv) > 3 else 30
+
+    W = 72
+    print(f"\n{'=' * W}")
+    print(f"  auth_source_search standalone test")
+    print(f"{'=' * W}")
+    print(f"  Q: {question[:68]}")
+    print(f"  max_pairs: {max_pairs} | qa_budget: {qa_budget}")
+    print(f"{'=' * W}\n")
+
+    @observe(name="auth_source_search")
+    async def _run():
+        timings: list[tuple[str, float]] = []
+        accumulated: dict = {}
+        t_prev = time.perf_counter()
+        t_start = t_prev
+
+        from Tools.text_navigator import AgentDocumentReader
+
+        reader_tmp = pathlib.Path(_READER_TMP_DIR)
+        reader_tmp.mkdir(parents=True, exist_ok=True)
+
+        navigator = AgentDocumentReader()
+        nav_state_path = str(reader_tmp / f"auth_nav_{uuid.uuid4().hex}.json")
+        run_dir = str(reader_tmp / f"auth_run_{uuid.uuid4().hex}")
+        pathlib.Path(run_dir).mkdir(parents=True, exist_ok=True)
+
+        initial_state: dict = {
+            "question": question,
+            "max_pairs": max_pairs,
+            "min_pairs": 2,
+            "max_download_reflections": 1,
+            "max_qa_reflections": 1,
+            "qa_budget": qa_budget,
+            "sub_goal": "",
+            "sub_goal_history": [],
+            "download_queries": {},
+            "download_weakness": "",
+            "download_reflection_count": 0,
+            "downloaded_reports": [],
+            "selected_reports": [],
+            "curr_answer": "",
+            "qa_weakness": "",
+            "qa_reflection_count": 0,
+            "navigator_state_path": nav_state_path,
+            "answer": "",
+            "pair_count": 0,
+        }
+        invoke_config = {
+            "configurable": {
+                "shared_navigator": navigator,
+                "shared_pdf_converter": None,
+                "run_dir": run_dir,
+            }
+        }
+
+        try:
+            async for event in auth_source_graph.astream(
+                initial_state, invoke_config, stream_mode="updates"
+            ):
+                t_now = time.perf_counter()
+                for node_name, node_updates in event.items():
+                    elapsed = t_now - t_prev
+                    timings.append((node_name, elapsed))
+                    # Show sub_goal and answer snippets for visibility
+                    detail = ""
+                    if isinstance(node_updates, dict):
+                        if sg := node_updates.get("sub_goal"):
+                            detail = f" sub_goal={sg[:50]}"
+                        if ca := node_updates.get("curr_answer"):
+                            detail = f" curr_answer={ca[:50]}..."
+                        for k, v in node_updates.items():
+                            if k == "sub_goal_history" and isinstance(v, list):
+                                accumulated.setdefault("sub_goal_history", [])
+                                accumulated["sub_goal_history"].extend(v)
+                            else:
+                                accumulated[k] = v
+                    elif isinstance(node_updates, Command):
+                        if node_updates.update and isinstance(node_updates.update, dict):
+                            accumulated.update(node_updates.update)
+                        detail = f" → {node_updates.goto}"
+                    print(f"  [{elapsed:6.2f}s] {node_name}{detail}")
+                t_prev = t_now
+        finally:
+            navigator.close_document()
+            shutil.rmtree(run_dir, ignore_errors=True)
+            if os.path.exists(nav_state_path):
+                os.remove(nav_state_path)
+
+        total = time.perf_counter() - t_start
+        print(f"\n{'─' * W}")
+        print(f"  Profiling: total {total:.2f}s")
+        print(f"{'─' * W}")
+        print(f"  {'node':<40} {'time(s)':>8}")
+        print(f"  {'-' * 50}")
+        for node, t in timings:
+            print(f"  {node:<40} {t:>8.2f}")
+
+        return accumulated
+
+    final = asyncio.run(_run())
+
+    print(f"\n{'=' * W}")
+    print(f"  ANSWER ({final.get('pair_count', 0)} pairs)")
+    print(f"{'=' * W}")
+    print(final.get("answer", "(no answer)"))
+    print(f"\n{'─' * W}")
+    print(f"  Sub-goal history:")
+    for i, sg in enumerate(final.get("sub_goal_history", []), 1):
+        print(f"  {i}. {sg}")
+    print(f"\n  Downloaded reports:")
+    for r in final.get("downloaded_reports", []):
+        print(f"  - {r['name']} ({r['source']})")
+    print(f"{'=' * W}")

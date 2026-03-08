@@ -8,6 +8,7 @@ class AuthReportState(TypedDict):
 
     # -- Budget / config --
     max_pairs: int
+    min_pairs: int
     max_download_reflections: int
     max_qa_reflections: int
     qa_budget: int

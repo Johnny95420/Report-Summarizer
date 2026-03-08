@@ -185,6 +185,7 @@ Your job is to craft a section of a professional report that is clear, logically
 - Time points aware
 - Present the description in a manner consistent with institutional investor or professional analyst reports—structured, clear, and logically organized.
 - Use ## only once per section for section title (Markdown format)
+- If the section naturally contains sub-topics, separate them with a horizontal rule `---` for visual clarity
 - Only use structural element IF it helps clarify your point:
   * Either a focused table (using Markdown table syntax) for
     - Comparing key items

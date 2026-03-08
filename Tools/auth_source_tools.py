@@ -138,6 +138,9 @@ def download_investanchor_report(
     Returns JSON string {"name": str, "path": str, "source": "investanchor"} on success.
     Returns JSON string {"error": str, "source": "investanchor"} on failure.
     """
+    # Strip spaces: both APIs use substring matching on titles, spaces break matching.
+    query = query.replace(" ", "")
+
     cookie = _cookie_provider()
     if not cookie:
         logger.warning("INVESTANCHOR_COOKIE is not set")
@@ -215,6 +218,9 @@ def download_yuanta_report(
 
     from Tools.document_preprocessors import PDFDocumentPreprocessor
 
+    # Strip spaces: Yuanta API uses substring matching on titles, spaces break matching.
+    query = query.replace(" ", "")
+
     cookie = _cookie_provider()
     if not cookie:
         logger.warning("YUANTA_COOKIES is not set")
@@ -238,6 +244,12 @@ def download_yuanta_report(
         reader_tmp.mkdir(parents=True, exist_ok=True)
         preprocessor = PDFDocumentPreprocessor(reader_tmp=str(reader_tmp))
         results = []
+
+        # Build converter once for the entire batch if not provided
+        if _converter is None:
+            from marker.converters.pdf import PdfConverter
+            from marker.models import create_model_dict
+            _converter = PdfConverter(artifact_dict=create_model_dict())
 
         for report in data["data"]:
             title = report.get("title", "report")
