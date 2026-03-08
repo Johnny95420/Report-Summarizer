@@ -151,7 +151,7 @@ class PDFProcessor:
         target_folder: str,
         do_extract_table: bool = True,
         model_name: str = "deepseek/deepseek-chat",
-        converter=None,
+        converter: PdfConverter | None = None,
     ):
         self.files = files
         self.target_folder = target_folder

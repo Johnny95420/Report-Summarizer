@@ -23,6 +23,6 @@ def test_pdf_processor_creates_converter_when_none():
          patch("Utils.pdf_processor.PdfConverter") as mock_pdfconv:
         from Utils.pdf_processor import PDFProcessor
 
-        proc = PDFProcessor(files=[], target_folder="/tmp/test_proc2")
+        PDFProcessor(files=[], target_folder="/tmp/test_proc2")
         mock_create.assert_called_once()
         mock_pdfconv.assert_called_once_with(artifact_dict=fake_dict)
