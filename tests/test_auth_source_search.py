@@ -268,3 +268,121 @@ def test_prompts_have_required_format_keys():
 
     assert "{question}" in outer_reflect_instruction
     assert "{answer}" in outer_reflect_instruction
+
+
+# -- _sanitize_qa_answer --
+
+
+def test_sanitize_qa_answer_valid():
+    from subagent.auth_source_search import _sanitize_qa_answer
+
+    answer = "台積電2024年第三季營收為 6,508 億元，年增 36%。"
+    assert _sanitize_qa_answer(answer) == answer
+
+
+def test_sanitize_qa_answer_empty():
+    from subagent.auth_source_search import _sanitize_qa_answer
+
+    assert _sanitize_qa_answer("") == ""
+    assert _sanitize_qa_answer("   ") == ""
+
+
+def test_sanitize_qa_answer_sentinel_unable():
+    from subagent.auth_source_search import _sanitize_qa_answer
+
+    assert _sanitize_qa_answer("[Unable to extract answer from documents]") == ""
+
+
+def test_sanitize_qa_answer_sentinel_llm_failed():
+    from subagent.auth_source_search import _sanitize_qa_answer
+
+    assert _sanitize_qa_answer("[LLM failed 3 times consecutively...]") == ""
+
+
+def test_sanitize_qa_answer_sentinel_budget():
+    from subagent.auth_source_search import _sanitize_qa_answer
+
+    assert _sanitize_qa_answer("[BUDGET EXHAUSTED — FINAL CALL]") == ""
+
+
+def test_sanitize_qa_answer_sentinel_answer_submitted():
+    from subagent.auth_source_search import _sanitize_qa_answer
+
+    assert _sanitize_qa_answer("[Answer submitted. Task complete.]") == ""
+
+
+def test_sanitize_qa_answer_planning_text():
+    from subagent.auth_source_search import _sanitize_qa_answer
+
+    planning = "[] 1. open_document\n[] 2. semantic_search\n[] 3. submit_answer"
+    assert _sanitize_qa_answer(planning) == ""
+
+
+def test_sanitize_qa_answer_done_checkboxes():
+    from subagent.auth_source_search import _sanitize_qa_answer
+
+    done = "[x] 1. opened\n[x] 2. searched"
+    assert _sanitize_qa_answer(done) == ""
+
+
+# -- Navigator save / restore --
+
+
+def test_save_navigator_state(tmp_path):
+    """Save writes bookmarks as lists + last_open_path."""
+    import json
+    from unittest.mock import MagicMock
+
+    from subagent.auth_source_search import _save_navigator_state
+    from Tools.text_navigator import Bookmark
+
+    nav = MagicMock()
+    nav._bookmarks = {"B1": Bookmark("/doc/a.json", "DocA", 3)}
+    nav._current_path = "/doc/a.json"
+
+    path = str(tmp_path / "state.json")
+    _save_navigator_state(nav, path)
+
+    with open(path) as f:
+        saved = json.load(f)
+
+    assert saved["last_open_path"] == "/doc/a.json"
+    assert saved["bookmarks"]["B1"] == ["/doc/a.json", "DocA", 3]
+
+
+def test_restore_navigator_state(tmp_path):
+    """Restore converts bookmark lists back to Bookmark NamedTuples."""
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from subagent.auth_source_search import _restore_navigator_state
+    from Tools.text_navigator import Bookmark
+
+    path = str(tmp_path / "state.json")
+    state = {
+        "bookmarks": {"B1": ["/doc/a.json", "DocA", 3]},
+        "last_open_path": "/doc/a.json",
+    }
+    with open(path, "w") as f:
+        json.dump(state, f)
+
+    nav = MagicMock()
+    nav._bookmarks = {}
+
+    with patch("os.path.exists", side_effect=lambda p: p in (path, "/doc/a.json")):
+        _restore_navigator_state(nav, path)
+
+    assert "B1" in nav._bookmarks
+    assert nav._bookmarks["B1"] == Bookmark("/doc/a.json", "DocA", 3)
+    nav.open_document.assert_called_once_with("/doc/a.json")
+
+
+def test_restore_navigator_state_missing_file(tmp_path):
+    """Missing state file -> no error, navigator unchanged."""
+    from unittest.mock import MagicMock
+
+    from subagent.auth_source_search import _restore_navigator_state
+
+    nav = MagicMock()
+    _restore_navigator_state(nav, str(tmp_path / "nonexistent.json"))
+    nav.open_document.assert_not_called()
