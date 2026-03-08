@@ -68,7 +68,7 @@ from Tools.tools import (
     refine_section_formatter,
     section_formatter,
 )
-from Utils.langfuse_tracing import langfuse_node
+from Utils.langfuse_tracing import langfuse_node, traced
 from Utils.utils import (
     call_llm,
     call_llm_async,
@@ -426,35 +426,39 @@ async def orchestration(state: SectionState, config: RunnableConfig):
         agentic_search_queries = configurable.get("agentic_search_queries", 3)
 
         async def _do_web():
-            search_results = await agentic_search_graph.ainvoke(
-                {
-                    "question": current_question.question,
-                    "max_num_iterations": agentic_search_iterations,
-                    "num_queries": agentic_search_queries,
-                    "url_memo": [],
-                    "source_registry": [],
-                }
-            )
-            return search_results.get("answer", "")
+            with traced("agentic_web_search"):
+                search_results = await agentic_search_graph.ainvoke(
+                    {
+                        "question": current_question.question,
+                        "max_num_iterations": agentic_search_iterations,
+                        "num_queries": agentic_search_queries,
+                        "url_memo": [],
+                        "source_registry": [],
+                    }
+                )
+                return search_results.get("answer", "")
 
         async_coros["web"] = _do_web()
 
     if use_auth:
         shared_converter = configurable.get("shared_pdf_converter")
         auth_max_pairs = configurable.get("auth_max_pairs", 3)
+        auth_min_pairs = configurable.get("auth_min_pairs", 2)
         auth_max_download_reflections = configurable.get("auth_max_download_reflections", 1)
         auth_max_qa_reflections = configurable.get("auth_max_qa_reflections", 1)
         auth_qa_budget = configurable.get("auth_qa_budget", 30)
 
         async def _do_auth():
-            return await run_auth_source_search(
-                question=current_question.question,
-                max_pairs=auth_max_pairs,
-                max_download_reflections=auth_max_download_reflections,
-                max_qa_reflections=auth_max_qa_reflections,
-                qa_budget=auth_qa_budget,
-                converter=shared_converter,
-            )
+            with traced("auth_source_search"):
+                return await run_auth_source_search(
+                    question=current_question.question,
+                    max_pairs=auth_max_pairs,
+                    min_pairs=auth_min_pairs,
+                    max_download_reflections=auth_max_download_reflections,
+                    max_qa_reflections=auth_max_qa_reflections,
+                    qa_budget=auth_qa_budget,
+                    converter=shared_converter,
+                )
 
         async_coros["auth"] = _do_auth()
 
@@ -835,9 +839,10 @@ class ReportGraphBuilder:
     def _build_section_graph(self) -> StateGraph:
         """Build the section subgraph (shared by sync/async)."""
         section_builder = StateGraph(SectionState, output_schema=SectionOutputState)
-        section_builder.add_node("generate_question", langfuse_node(generate_question))
-        section_builder.add_node("orchestration", langfuse_node(orchestration))
-        section_builder.add_node("write_section", langfuse_node(write_section))
+        _sk = "section.name"  # state_key: disambiguate parallel section spans
+        section_builder.add_node("generate_question", langfuse_node(generate_question, state_key=_sk))
+        section_builder.add_node("orchestration", langfuse_node(orchestration, state_key=_sk))
+        section_builder.add_node("write_section", langfuse_node(write_section, state_key=_sk))
 
         section_builder.add_edge(START, "generate_question")
         section_builder.add_edge("generate_question", "orchestration")
@@ -845,12 +850,38 @@ class ReportGraphBuilder:
 
         return section_builder
 
+    @staticmethod
+    def _make_section_wrapper(compiled_section_graph):
+        """Create a traced wrapper around the compiled section subgraph.
+
+        Wraps the subgraph invocation in a ``section_writer [name]`` Langfuse
+        span so that internal nodes (generate_question, orchestration,
+        write_section) nest under it instead of appearing flat at root level.
+        """
+
+        async def _section_writer(state: SectionState, config: RunnableConfig) -> dict:
+            section_name = state.get("section", {})
+            if hasattr(section_name, "name"):
+                section_name = section_name.name
+            elif isinstance(section_name, dict):
+                section_name = section_name.get("name", "")
+            span_name = f"section_writer [{section_name}]" if section_name else "section_writer"
+
+            with traced(span_name):
+                result = await compiled_section_graph.ainvoke(state, config)
+            return result
+
+        return _section_writer
+
     def _build_main_graph(self, section_graph: StateGraph) -> StateGraph:
         """Build the main report graph (shared by sync/async)."""
         builder = StateGraph(ReportState, input_schema=ReportStateInput, output_schema=ReportStateOutput)
         builder.add_node("generate_report_plan", langfuse_node(generate_report_plan))
         builder.add_node("human_feedback", langfuse_node(human_feedback))
-        builder.add_node("build_section_with_web_research", section_graph.compile())
+        builder.add_node(
+            "build_section_with_web_research",
+            self._make_section_wrapper(section_graph.compile()),
+        )
         builder.add_node("route", langfuse_node(route_node))
         builder.add_node("refine_sections", langfuse_node(refine_sections))
         builder.add_node("gather_complete_section", langfuse_node(gather_complete_section))

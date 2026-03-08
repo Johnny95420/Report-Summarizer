@@ -23,6 +23,7 @@ BACKUP_MODEL_NAME = config["BACKUP_MODEL_NAME"]
 VERIFY_MODEL_NAME = config["VERIFY_MODEL_NAME"]
 BACKUP_VERIFY_MODEL_NAME = config["BACKUP_VERIFY_MODEL_NAME"]
 
+import chromadb
 from langchain_community.callbacks.infino_callback import get_num_tokens
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
@@ -49,8 +50,7 @@ from Utils.utils import (
     call_search_api,
     web_search_deduplicate_and_format_sources,
 )
-from langfuse import observe
-from Utils.langfuse_tracing import langfuse_node
+from Utils.langfuse_tracing import langfuse_node, observe
 
 # Setup logger
 logger = logging.getLogger("AgenticSearch")
@@ -244,7 +244,6 @@ def perform_web_search(state: AgenticSearchState):
     }
 
 
-@observe(name="filter_and_format_results")
 async def filter_and_format_results(state: AgenticSearchState):
     followed_up_queries = state.get("followed_up_queries", [])
     queries = followed_up_queries if followed_up_queries else state["queries"]
@@ -307,7 +306,6 @@ async def filter_and_format_results(state: AgenticSearchState):
     return {"filtered_web_results": filtered_web_results}
 
 
-@observe(name="compress_raw_content")
 async def compress_raw_content(state: AgenticSearchState):
     followed_up_queries = state.get("followed_up_queries", [])
     queries = followed_up_queries if followed_up_queries else state["queries"]
@@ -563,7 +561,12 @@ def chunk_large_articles(state: AgenticSearchState) -> dict:
             try:
                 docs = [Document(chunk) for chunk in splitter.split_text(raw)]
                 collection_name = f"chunk_{uuid.uuid4().hex}"  # unique name avoids cross-article conflicts
-                vs = Chroma.from_documents(docs, embeddings, collection_name=collection_name)
+                ephemeral_client = chromadb.EphemeralClient()
+                vs = Chroma.from_documents(
+                    docs, embeddings,
+                    collection_name=collection_name,
+                    client=ephemeral_client,
+                )
                 try:
                     hits = vs.similarity_search(query, k=5)
                 finally:
@@ -596,14 +599,10 @@ class AgenticSearchGraphBuilder:
             builder.add_node("get_searching_budget",           langfuse_node(get_searching_budget))
             builder.add_node("generate_queries_from_question", langfuse_node(generate_queries_from_question))
             builder.add_node("perform_web_search",             langfuse_node(perform_web_search))
-            # Registered without langfuse_node: these are async functions and langfuse_node
-            # wrapping async nodes silently drops spans in Langfuse 3.x OTLP mode.
-            # @observe is applied directly on the function definitions above instead.
-            # Sync nodes (all others in this graph) use langfuse_node safely.
-            builder.add_node("filter_and_format_results",      filter_and_format_results)
+            builder.add_node("filter_and_format_results",      langfuse_node(filter_and_format_results))
             builder.add_node("crawl_filtered_results",         langfuse_node(crawl_filtered_results))
             builder.add_node("chunk_large_articles",           langfuse_node(chunk_large_articles))
-            builder.add_node("compress_raw_content",           compress_raw_content)
+            builder.add_node("compress_raw_content",           langfuse_node(compress_raw_content))
             builder.add_node("aggregate_final_results",        langfuse_node(aggregate_final_results))
             builder.add_node("synthesize_answer",              langfuse_node(synthesize_answer))
             builder.add_node("check_searching_results",        langfuse_node(check_searching_results))
