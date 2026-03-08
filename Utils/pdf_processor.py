@@ -151,14 +151,14 @@ class PDFProcessor:
         target_folder: str,
         do_extract_table: bool = True,
         model_name: str = "deepseek/deepseek-chat",
+        converter=None,
     ):
-
         self.files = files
         self.target_folder = target_folder
         os.makedirs(self.target_folder, exist_ok=True)
         self.do_extract_table = do_extract_table
         self.model_name = model_name
-        self.converter = PdfConverter(
+        self.converter = converter or PdfConverter(
             artifact_dict=create_model_dict(),
         )
 
