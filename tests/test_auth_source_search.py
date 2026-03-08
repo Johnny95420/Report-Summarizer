@@ -519,3 +519,86 @@ def test_execute_downloads_skips_none_query():
 
     mock_ia.assert_not_called()
     mock_yn.assert_not_called()
+
+
+def _make_llm_response(tool_name: str, **args):
+    from unittest.mock import MagicMock
+
+    resp = MagicMock()
+    resp.tool_calls = [{"args": args}]
+    return resp
+
+
+# -- plan_sub_goal --
+
+
+def test_plan_sub_goal_first_call():
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import plan_sub_goal_node
+
+    mock_resp = _make_llm_response("sub_goal_formatter", sub_goal="台積電 N3 良率")
+    with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
+        result = plan_sub_goal_node(_base_state())
+
+    assert result["sub_goal"] == "台積電 N3 良率"
+    assert result["download_reflection_count"] == 0
+    assert result["qa_reflection_count"] == 0
+    assert result["curr_answer"] == ""
+    assert "台積電 N3 良率" in result["sub_goal_history"]
+
+
+def test_plan_sub_goal_subsequent_resets_counters():
+    """On every call (first or subsequent), counters reset to 0."""
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import plan_sub_goal_node
+
+    mock_resp = _make_llm_response("sub_goal_formatter", sub_goal="新子目標")
+    state = _base_state(
+        sub_goal_history=["前一個子目標"],
+        download_reflection_count=1,
+        qa_reflection_count=1,
+    )
+    with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
+        result = plan_sub_goal_node(state)
+
+    assert result["download_reflection_count"] == 0
+    assert result["qa_reflection_count"] == 0
+    assert result["curr_answer"] == ""
+
+
+# -- generate_download_queries --
+
+
+def test_generate_download_queries_returns_dict():
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import generate_download_queries_node
+
+    mock_resp = _make_llm_response("download_queries_formatter", investanchor="台積電 N3 2024", yuanta=None)
+    with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
+        result = generate_download_queries_node(_base_state())
+
+    assert result["download_queries"]["investanchor"] == "台積電 N3 2024"
+    assert result["download_queries"]["yuanta"] is None
+
+
+def test_generate_download_queries_includes_weakness_in_prompt():
+    """On retry, download_weakness must appear in the prompt sent to call_llm."""
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import generate_download_queries_node
+
+    captured = {}
+
+    def capture_call(model, backup, prompt, **kwargs):
+        # prompt is a list of messages — serialize to check content
+        captured["prompt"] = str(prompt)
+        return _make_llm_response("download_queries_formatter", investanchor="refined", yuanta=None)
+
+    state = _base_state(download_weakness="前次搜尋缺少季度資料")
+    with patch("subagent.auth_source_search.call_llm", side_effect=capture_call):
+        generate_download_queries_node(state)
+
+    assert "前次搜尋缺少季度資料" in captured["prompt"]

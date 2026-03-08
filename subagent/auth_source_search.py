@@ -15,13 +15,21 @@ import pathlib
 import re
 
 import omegaconf
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
+from Prompt.auth_source_prompt import (
+    generate_download_queries_instruction,
+    plan_sub_goal_instruction,
+)
 from State.auth_source_state import AuthReportState
 from Tools.auth_source_tools import (
     download_investanchor_report,
+    download_queries_formatter,
     download_yuanta_report,
+    sub_goal_formatter,
 )
+from Utils.utils import call_llm
 
 _HERE = pathlib.Path(__file__).parent.parent
 _config = omegaconf.OmegaConf.load(_HERE / "report_config.yaml")
@@ -145,3 +153,65 @@ def execute_downloads_node(state: AuthReportState, config: RunnableConfig) -> di
             logger.error("[execute_downloads] yuanta download failed: %s", e)
 
     return {"downloaded_reports": new_reports}
+
+
+# ---------------------------------------------------------------------------
+# plan_sub_goal node
+# ---------------------------------------------------------------------------
+def plan_sub_goal_node(state: AuthReportState) -> dict:
+    """Plan the next sub-goal to research from institutional reports."""
+    system_instruction = plan_sub_goal_instruction.format(
+        question=state["question"],
+        answer=state.get("answer", "") or "(none yet)",
+        sub_goal_history="\n".join(state.get("sub_goal_history", [])) or "None",
+        pair_count=state.get("pair_count", 0),
+    )
+    response = call_llm(
+        MODEL_NAME,
+        BACKUP_MODEL_NAME,
+        prompt=[
+            SystemMessage(content=system_instruction),
+            HumanMessage(content="依據以上指示，規劃下一個研究子目標。"),
+        ],
+        tool=[sub_goal_formatter],
+        tool_choice="required",
+    )
+    sub_goal = response.tool_calls[0]["args"]["sub_goal"]
+    return {
+        "sub_goal": sub_goal,
+        "sub_goal_history": [sub_goal],
+        "download_reflection_count": 0,
+        "qa_reflection_count": 0,
+        "curr_answer": "",
+    }
+
+
+# ---------------------------------------------------------------------------
+# generate_download_queries node
+# ---------------------------------------------------------------------------
+def generate_download_queries_node(state: AuthReportState) -> dict:
+    """Generate keyword search queries for each institutional report source."""
+    existing = state.get("downloaded_reports", [])
+    already_downloaded = "\n".join(f"- {r['name']} ({r['source']})" for r in existing) if existing else "None"
+    system_instruction = generate_download_queries_instruction.format(
+        sub_goal=state["sub_goal"],
+        download_weakness=state.get("download_weakness", "") or "(no previous weakness)",
+        already_downloaded=already_downloaded,
+    )
+    response = call_llm(
+        MODEL_NAME,
+        BACKUP_MODEL_NAME,
+        prompt=[
+            SystemMessage(content=system_instruction),
+            HumanMessage(content="依據以上指示，產生搜尋關鍵字。"),
+        ],
+        tool=[download_queries_formatter],
+        tool_choice="required",
+    )
+    args = response.tool_calls[0]["args"]
+    return {
+        "download_queries": {
+            "investanchor": args.get("investanchor"),
+            "yuanta": args.get("yuanta"),
+        }
+    }
