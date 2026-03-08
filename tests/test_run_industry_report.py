@@ -106,8 +106,14 @@ async def test_industry_report_end_to_end():
         "report_writer.web_search_deduplicate_and_format_sources": lambda *a, **kw: "mock web results",
         # Agentic search subgraph used in orchestration
         "report_writer.agentic_search_graph": MagicMock(
-            ainvoke=AsyncMock(return_value={"answer": "Mock agentic search answer with [1] citations.\n\n### Sources\n[1] Mock Source — http://mock.com"})
+            ainvoke=AsyncMock(
+                return_value={
+                    "answer": "Mock agentic search answer with [1] citations.\n\n### Sources\n[1] Mock Source — http://mock.com"
+                }
+            )
         ),
+        # Auth source search subagent
+        "report_writer.run_auth_source_search": AsyncMock(return_value="Mock institutional report answer."),
     }
 
     with patch.multiple("report_writer", **{k.split(".")[-1]: v for k, v in patches.items()}):
@@ -127,6 +133,11 @@ async def test_industry_report_end_to_end():
                     "planner_search_queries": 2,
                     "use_web": True,
                     "use_local_db": False,
+                    "use_auth": False,
+                    "auth_max_pairs": 1,
+                    "auth_max_download_reflections": 1,
+                    "auth_max_qa_reflections": 1,
+                    "auth_qa_budget": 5,
                     "max_search_depth": 1,
                     "agentic_search_iterations": 1,
                     "agentic_search_queries": 3,
@@ -157,3 +168,68 @@ async def test_industry_report_end_to_end():
             assert len(final_report) > 0, "final_report should not be empty"
             # Both sections should have contributed content
             assert "Mock" in final_report or "Refined" in final_report
+
+
+@pytest.mark.asyncio
+async def test_industry_report_with_auth_enabled():
+    """Smoke test: use_auth=True causes run_auth_source_search to be called."""
+    mock_auth = AsyncMock(return_value="Mock institutional answer.")
+
+    patches = {
+        "report_writer.call_llm": _mock_call_llm,
+        "report_writer.call_llm_async": _mock_call_llm_async,
+        "report_writer.get_num_tokens": lambda *a, **kw: 100,
+        "report_writer.call_search_api": lambda *a, **kw: [],
+        "report_writer.web_search_deduplicate_and_format_sources": lambda *a, **kw: "mock web results",
+        "report_writer.agentic_search_graph": MagicMock(ainvoke=AsyncMock(return_value={"answer": "Mock web answer."})),
+        "report_writer.run_auth_source_search": mock_auth,
+    }
+
+    with patch.multiple("report_writer", **{k.split(".")[-1]: v for k, v in patches.items()}):
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+        from langgraph.types import Command
+
+        from report_writer import ReportGraphBuilder
+        from State.state import ReportStateInput
+
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
+            builder = ReportGraphBuilder(async_checkpointer=checkpointer)
+            graph = builder.get_async_graph()
+
+            config = {
+                "configurable": {
+                    "thread_id": "auth-smoke-test",
+                    "planner_search_queries": 2,
+                    "use_web": True,
+                    "use_local_db": False,
+                    "use_auth": True,
+                    "auth_max_pairs": 1,
+                    "auth_max_download_reflections": 1,
+                    "auth_max_qa_reflections": 1,
+                    "auth_qa_budget": 5,
+                    "agentic_search_iterations": 1,
+                    "agentic_search_queries": 3,
+                    "refine_iteration": 0,
+                    "max_search_depth": 1,
+                    "report_structure": "default",
+                    "recursion_limit": 100,
+                }
+            }
+
+            input_data = ReportStateInput(topic="Test topic with auth")
+
+            # Phase 1: run until interrupt
+            interrupted = False
+            async for event in graph.astream(input_data, config, stream_mode="updates"):
+                if "__interrupt__" in event:
+                    interrupted = True
+                    break
+
+            assert interrupted
+
+            # Phase 2: resume
+            async for _ in graph.astream(Command(resume=True), config, stream_mode="updates"):
+                pass
+
+        # run_auth_source_search must have been called at least once
+        assert mock_auth.call_count >= 1

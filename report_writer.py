@@ -29,18 +29,6 @@ BACKUP_CONCLUDE_MODEL_NAME = config["BACKUP_CONCLUDE_MODEL_NAME"]
 
 DEFAULT_REPORT_STRUCTURE = config["REPORT_STRUCTURE"]
 
-from Prompt.industry_prompt import (
-    content_refinement_instructions,
-    final_section_writer_instructions,
-    section_question_instructions,
-    refine_section_instructions,
-    report_planner_instructions,
-    report_planner_query_writer_instructions,
-    section_grader_instructions,
-    section_writer_instructions,
-)
-
-
 from copy import deepcopy
 
 from langchain_community.callbacks.infino_callback import get_num_tokens
@@ -50,7 +38,16 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
 
-from subagent.agentic_search import agentic_search_graph
+from Prompt.industry_prompt import (
+    content_refinement_instructions,
+    final_section_writer_instructions,
+    refine_section_instructions,
+    report_planner_instructions,
+    report_planner_query_writer_instructions,
+    section_grader_instructions,
+    section_question_instructions,
+    section_writer_instructions,
+)
 from retriever import hybrid_retriever
 from State.state import (
     Question,
@@ -61,14 +58,17 @@ from State.state import (
     SectionOutputState,
     SectionState,
 )
+from subagent.agentic_search import agentic_search_graph
+from subagent.auth_source_search import run_auth_source_search
 from Tools.tools import (
     content_refinement_formatter,
     feedback_formatter,
-    question_formatter,
     queries_formatter,
+    question_formatter,
     refine_section_formatter,
     section_formatter,
 )
+from Utils.langfuse_tracing import langfuse_node
 from Utils.utils import (
     call_llm,
     call_llm_async,
@@ -79,7 +79,6 @@ from Utils.utils import (
     track_expanded_context,
     web_search_deduplicate_and_format_sources,
 )
-from Utils.langfuse_tracing import langfuse_node
 
 logger = logging.getLogger("AgentLogger")
 logger.setLevel(logging.INFO)
@@ -356,7 +355,9 @@ def generate_question(state: SectionState, config: RunnableConfig):
     ]
 
     logger.info(f"== Start generate question for topic: {section.name} ==")
-    result = call_llm(MODEL_NAME, BACKUP_MODEL_NAME, prompt=base_prompt, tool=[question_formatter], tool_choice="required")
+    result = call_llm(
+        MODEL_NAME, BACKUP_MODEL_NAME, prompt=base_prompt, tool=[question_formatter], tool_choice="required"
+    )
     logger.info(f"== End generate question for topic: {section.name} ==")
 
     if not result.tool_calls:
@@ -364,7 +365,8 @@ def generate_question(state: SectionState, config: RunnableConfig):
         result = call_llm(
             MODEL_NAME,
             BACKUP_MODEL_NAME,
-            prompt=base_prompt + [result, HumanMessage(content="You must call the question_formatter tool to submit your answer.")],
+            prompt=base_prompt
+            + [result, HumanMessage(content="You must call the question_formatter tool to submit your answer.")],
             tool=[question_formatter],
             tool_choice="required",
         )
@@ -380,14 +382,30 @@ def generate_question(state: SectionState, config: RunnableConfig):
 
 
 async def orchestration(state: SectionState, config: RunnableConfig):
-    """Orchestrate research sub-agents to answer the current question."""
+    """Orchestrate research sub-agents to answer the current question.
+
+    Supports three non-exclusive search paths, selected via config flags:
+      use_local_db — hybrid RAG over ingested documents
+      use_web      — agentic web search (agentic_search_graph)
+      use_auth     — institutional report search (auth_source_search)
+
+    When use_web and use_auth are both True, both sub-agents run concurrently
+    via asyncio.gather so neither blocks the other.
+    """
     current_question = state["current_question"]
     configurable = config["configurable"]
     use_web = configurable.get("use_web", False)
     use_local_db = configurable.get("use_local_db", False)
+    use_auth = configurable.get("use_auth", False)
 
-    if not use_web and not use_local_db:
+    if not use_web and not use_local_db and not use_auth:
         raise ValueError("Should use at least one searching tool")
+
+    # REVISION S4d: warning when auth-only
+    if use_auth and not use_web and not use_local_db:
+        logger.warning(
+            "use_auth=True without use_web or use_local_db -- section will only have institutional report content"
+        )
 
     logger.info(f"== Start orchestration for topic: {state['section'].name} ==")
 
@@ -396,28 +414,76 @@ async def orchestration(state: SectionState, config: RunnableConfig):
     new_source_block = ""
 
     if use_local_db:
-        # Use the question text as the search query for local DB
         results = search_relevance_doc([current_question.question])
         local_str = format_search_results_with_metadata(results)
         new_source_block += local_str
 
+    # ── Launch async sub-agents concurrently ──────────────────────────────
+    async_tasks: dict[str, asyncio.Task] = {}
+
     if use_web:
         agentic_search_iterations = configurable.get("agentic_search_iterations", 1)
         agentic_search_queries = configurable.get("agentic_search_queries", 3)
-        search_results = await agentic_search_graph.ainvoke({
-            "question": current_question.question,
-            "max_num_iterations": agentic_search_iterations,
-            "num_queries": agentic_search_queries,
-            "url_memo": [],
-            "source_registry": [],
-        })
-        answer = search_results.get("answer", "")
-        web_block = (
-            f"## Research Iteration {iteration_num}\n"
-            f"**Question:**\n{current_question.question}\n\n"
-            f"**Answer:**\n{answer}"
-        )
-        new_source_block += ("\n\n" if new_source_block else "") + web_block
+
+        async def _do_web():
+            search_results = await agentic_search_graph.ainvoke(
+                {
+                    "question": current_question.question,
+                    "max_num_iterations": agentic_search_iterations,
+                    "num_queries": agentic_search_queries,
+                    "url_memo": [],
+                    "source_registry": [],
+                }
+            )
+            return search_results.get("answer", "")
+
+        async_tasks["web"] = asyncio.create_task(_do_web())
+
+    if use_auth:
+        shared_converter = configurable.get("shared_pdf_converter")  # REVISION S1
+        auth_max_pairs = configurable.get("auth_max_pairs", 3)
+        auth_max_download_reflections = configurable.get("auth_max_download_reflections", 1)
+        auth_max_qa_reflections = configurable.get("auth_max_qa_reflections", 1)
+        auth_qa_budget = configurable.get("auth_qa_budget", 30)
+
+        async def _do_auth():
+            return await run_auth_source_search(
+                question=current_question.question,
+                max_pairs=auth_max_pairs,
+                max_download_reflections=auth_max_download_reflections,
+                max_qa_reflections=auth_max_qa_reflections,
+                qa_budget=auth_qa_budget,
+                converter=shared_converter,  # REVISION S1
+            )
+
+        async_tasks["auth"] = asyncio.create_task(_do_auth())
+
+    if async_tasks:
+        results_list = await asyncio.gather(*async_tasks.values(), return_exceptions=True)
+        result_map = dict(zip(async_tasks.keys(), results_list))
+
+        blocks = []
+
+        if "web" in result_map:
+            web_answer = result_map["web"] if not isinstance(result_map["web"], Exception) else ""
+            if web_answer:
+                blocks.append(
+                    f"## Research Iteration {iteration_num}\n"
+                    f"**Question:**\n{current_question.question}\n\n"
+                    f"**Answer:**\n{web_answer}"  # REVISION S4c: keep original header
+                )
+
+        if "auth" in result_map:
+            auth_answer = result_map["auth"] if not isinstance(result_map["auth"], Exception) else ""
+            # Suppress the sentinel string — treat it as "no useful content"
+            if auth_answer and "[auth_source_search:" not in auth_answer:
+                blocks.append(
+                    f"## Research Iteration {iteration_num}\n"
+                    f"**Question:**\n{current_question.question}\n\n"
+                    f"**Institutional Reports Answer:**\n{auth_answer}"
+                )
+
+        new_source_block += ("\n\n" if new_source_block else "") + "\n\n".join(blocks)
 
     source_str = existing_source_str + ("\n\n" if existing_source_str else "") + new_source_block
     logger.info(f"== End orchestration for topic: {state['section'].name} ==")
@@ -622,9 +688,7 @@ async def gather_complete_section(state: ReportState, config: RunnableConfig):
     }
 
 
-async def _refine_single_section(
-    section: Section, full_context: str
-) -> tuple[Section, str]:
+async def _refine_single_section(section: Section, full_context: str) -> tuple[Section, str]:
     """Refine a single section and return a weakness description for follow-up research."""
     if not section.research:
         return section, ""
@@ -668,9 +732,7 @@ async def refine_sections(state: ReportState, config: RunnableConfig):
     sections = state["completed_sections"]
     full_context = format_sections(sections)
 
-    refined_sections = await asyncio.gather(
-        *[_refine_single_section(s, full_context) for s in sections]
-    )
+    refined_sections = await asyncio.gather(*[_refine_single_section(s, full_context) for s in sections])
 
     return Command(
         update={
@@ -773,8 +835,8 @@ class ReportGraphBuilder:
         """Build the section subgraph (shared by sync/async)."""
         section_builder = StateGraph(SectionState, output_schema=SectionOutputState)
         section_builder.add_node("generate_question", langfuse_node(generate_question))
-        section_builder.add_node("orchestration",     langfuse_node(orchestration))
-        section_builder.add_node("write_section",     langfuse_node(write_section))
+        section_builder.add_node("orchestration", langfuse_node(orchestration))
+        section_builder.add_node("write_section", langfuse_node(write_section))
 
         section_builder.add_edge(START, "generate_question")
         section_builder.add_edge("generate_question", "orchestration")
@@ -785,14 +847,14 @@ class ReportGraphBuilder:
     def _build_main_graph(self, section_graph: StateGraph) -> StateGraph:
         """Build the main report graph (shared by sync/async)."""
         builder = StateGraph(ReportState, input_schema=ReportStateInput, output_schema=ReportStateOutput)
-        builder.add_node("generate_report_plan",           langfuse_node(generate_report_plan))
-        builder.add_node("human_feedback",                  langfuse_node(human_feedback))
+        builder.add_node("generate_report_plan", langfuse_node(generate_report_plan))
+        builder.add_node("human_feedback", langfuse_node(human_feedback))
         builder.add_node("build_section_with_web_research", section_graph.compile())
-        builder.add_node("route",                           langfuse_node(route_node))
-        builder.add_node("refine_sections",                 langfuse_node(refine_sections))
-        builder.add_node("gather_complete_section",         langfuse_node(gather_complete_section))
-        builder.add_node("write_final_sections",            langfuse_node(write_final_sections))
-        builder.add_node("compile_final_report",            langfuse_node(compile_final_report))
+        builder.add_node("route", langfuse_node(route_node))
+        builder.add_node("refine_sections", langfuse_node(refine_sections))
+        builder.add_node("gather_complete_section", langfuse_node(gather_complete_section))
+        builder.add_node("write_final_sections", langfuse_node(write_final_sections))
+        builder.add_node("compile_final_report", langfuse_node(compile_final_report))
 
         builder.add_edge(START, "generate_report_plan")
         builder.add_edge("generate_report_plan", "human_feedback")
