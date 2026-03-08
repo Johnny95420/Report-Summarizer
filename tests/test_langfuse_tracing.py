@@ -5,9 +5,20 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+def _make_mock_client():
+    """Create a mock Langfuse client with start_as_current_span returning a context manager."""
+    mock_client = MagicMock()
+    mock_span_ctx = MagicMock()
+    mock_span_ctx.__enter__ = MagicMock(return_value=mock_span_ctx)
+    mock_span_ctx.__exit__ = MagicMock(return_value=False)
+    mock_client.start_as_current_span.return_value = mock_span_ctx
+    return mock_client
+
+
 def test_langfuse_node_wraps_sync_function():
     """langfuse_node wraps a sync function, preserving __name__ and behavior."""
-    with patch("Utils.langfuse_tracing.observe", lambda **kw: (lambda fn: fn)):
+    mock_client = _make_mock_client()
+    with patch("Utils.langfuse_tracing.get_client", return_value=mock_client):
         from importlib import reload
         import Utils.langfuse_tracing
         reload(Utils.langfuse_tracing)
@@ -23,7 +34,8 @@ def test_langfuse_node_wraps_sync_function():
 
 def test_langfuse_node_wraps_async_function():
     """langfuse_node wraps an async function, preserving __name__ and behavior."""
-    with patch("Utils.langfuse_tracing.observe", lambda **kw: (lambda fn: fn)):
+    mock_client = _make_mock_client()
+    with patch("Utils.langfuse_tracing.get_client", return_value=mock_client):
         from importlib import reload
         import Utils.langfuse_tracing
         reload(Utils.langfuse_tracing)
@@ -40,7 +52,8 @@ def test_langfuse_node_wraps_async_function():
 
 def test_langfuse_node_passes_extra_args():
     """langfuse_node passes extra args (e.g. config: RunnableConfig) through unchanged."""
-    with patch("Utils.langfuse_tracing.observe", lambda **kw: (lambda fn: fn)):
+    mock_client = _make_mock_client()
+    with patch("Utils.langfuse_tracing.get_client", return_value=mock_client):
         from importlib import reload
         import Utils.langfuse_tracing
         reload(Utils.langfuse_tracing)
@@ -54,14 +67,9 @@ def test_langfuse_node_passes_extra_args():
 
 
 def test_langfuse_node_uses_function_name_as_span_name():
-    """langfuse_node calls observe(name=fn.__name__)."""
-    observed_kwargs = []
-
-    def fake_observe(**kwargs):
-        observed_kwargs.append(kwargs)
-        return lambda fn: fn
-
-    with patch("Utils.langfuse_tracing.observe", fake_observe):
+    """langfuse_node passes fn.__name__ to start_as_current_span."""
+    mock_client = _make_mock_client()
+    with patch("Utils.langfuse_tracing.get_client", return_value=mock_client):
         from importlib import reload
         import Utils.langfuse_tracing
         reload(Utils.langfuse_tracing)
@@ -70,19 +78,15 @@ def test_langfuse_node_uses_function_name_as_span_name():
         def perform_web_search(state):
             return {}
 
-        langfuse_node(perform_web_search)
-        assert any(kw.get("name") == "perform_web_search" for kw in observed_kwargs)
+        wrapped = langfuse_node(perform_web_search)
+        wrapped({})
+        mock_client.start_as_current_span.assert_called_once_with(name="perform_web_search")
 
 
 def test_langfuse_node_accepts_name_override():
     """langfuse_node uses explicit name= override when provided."""
-    observed_kwargs = []
-
-    def fake_observe(**kwargs):
-        observed_kwargs.append(kwargs)
-        return lambda fn: fn
-
-    with patch("Utils.langfuse_tracing.observe", fake_observe):
+    mock_client = _make_mock_client()
+    with patch("Utils.langfuse_tracing.get_client", return_value=mock_client):
         from importlib import reload
         import Utils.langfuse_tracing
         reload(Utils.langfuse_tracing)
@@ -91,8 +95,46 @@ def test_langfuse_node_accepts_name_override():
         def tool_node_fn(state):
             return {}
 
-        langfuse_node(tool_node_fn, name="tools")
-        assert any(kw.get("name") == "tools" for kw in observed_kwargs)
+        wrapped = langfuse_node(tool_node_fn, name="tools")
+        wrapped({})
+        mock_client.start_as_current_span.assert_called_once_with(name="tools")
+
+
+def test_langfuse_node_state_key_appends_section_name():
+    """langfuse_node with state_key appends the value from state to span name."""
+    mock_client = _make_mock_client()
+    with patch("Utils.langfuse_tracing.get_client", return_value=mock_client):
+        from importlib import reload
+        import Utils.langfuse_tracing
+        reload(Utils.langfuse_tracing)
+        from Utils.langfuse_tracing import langfuse_node
+
+        section = MagicMock()
+        section.name = "半導體分析"
+
+        def my_node(state):
+            return {}
+
+        wrapped = langfuse_node(my_node, state_key="section.name")
+        wrapped({"section": section})
+        mock_client.start_as_current_span.assert_called_once_with(name="my_node [半導體分析]")
+
+
+def test_langfuse_node_state_key_missing_falls_back():
+    """langfuse_node with state_key falls back to base name when key not in state."""
+    mock_client = _make_mock_client()
+    with patch("Utils.langfuse_tracing.get_client", return_value=mock_client):
+        from importlib import reload
+        import Utils.langfuse_tracing
+        reload(Utils.langfuse_tracing)
+        from Utils.langfuse_tracing import langfuse_node
+
+        def my_node(state):
+            return {}
+
+        wrapped = langfuse_node(my_node, state_key="section.name")
+        wrapped({"other_key": "value"})
+        mock_client.start_as_current_span.assert_called_once_with(name="my_node")
 
 
 def test_get_langfuse_callback_returns_handler_inside_trace():

@@ -27,8 +27,7 @@ from State.document_qa_state import DocumentQAState
 from Tools.reader_models import FileReference
 from Tools.text_navigator import AgentDocumentReader
 from Utils.utils import call_llm
-from langfuse import observe
-from Utils.langfuse_tracing import langfuse_node
+from Utils.langfuse_tracing import langfuse_node, observe, traced_thread
 
 # Load configurations
 _HERE = pathlib.Path(__file__).parent.parent
@@ -402,7 +401,7 @@ async def run_document_qa_async(
     navigator, graph, initial_state, invoke_config = _prepare_qa_session(file_paths, question, budget)
 
     try:
-        result = await asyncio.to_thread(graph.invoke, initial_state, invoke_config)
+        result = await traced_thread(graph.invoke, initial_state, invoke_config)
     finally:
         navigator.close_document()
 
