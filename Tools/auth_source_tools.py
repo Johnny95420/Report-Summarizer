@@ -8,10 +8,12 @@ File strategy: two-layer directory.
   - Per-run dir:  reader_tmp/auth_run_{uuid}/ (symlinks, deleted after run)
 """
 
+import contextlib
 import json
 import logging
 import os
 from pathlib import Path
+from typing import Literal
 
 import requests
 from langchain_core.documents import Document
@@ -41,7 +43,7 @@ def _ensure_symlink(global_path: str, run_dir: str) -> str:
     """Create a symlink in run_dir pointing to global_path. Return symlink path."""
     link_name = os.path.basename(global_path)
     link_path = os.path.join(run_dir, link_name)
-    if not os.path.exists(link_path):
+    with contextlib.suppress(FileExistsError):
         os.symlink(os.path.abspath(global_path), link_path)
     return link_path
 
@@ -82,7 +84,7 @@ def document_selection_formatter(selected_names: list[str]) -> str:
 
 
 @tool
-def reflect_download_formatter(grade: str, download_weakness: str) -> str:
+def reflect_download_formatter(grade: Literal["pass", "fail"], download_weakness: str) -> str:
     """Grade whether downloaded reports are sufficient for this sub-goal.
 
     Args:
@@ -93,7 +95,7 @@ def reflect_download_formatter(grade: str, download_weakness: str) -> str:
 
 
 @tool
-def reflect_qa_formatter(grade: str, qa_weakness: str) -> str:
+def reflect_qa_formatter(grade: Literal["pass", "fail"], qa_weakness: str) -> str:
     """Grade whether the QA answer adequately addresses the sub-goal.
 
     Args:
@@ -110,7 +112,7 @@ def synthesis_formatter(merged_answer: str) -> str:
 
 
 @tool
-def outer_reflect_formatter(grade: str, hint: str) -> str:
+def outer_reflect_formatter(grade: Literal["pass", "fail"], hint: str) -> str:
     """Grade whether the main question is fully answered.
 
     Args:
