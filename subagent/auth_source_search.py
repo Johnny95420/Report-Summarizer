@@ -17,17 +17,27 @@ import re
 import omegaconf
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.graph import END
+from langgraph.types import Command
 
 from Prompt.auth_source_prompt import (
     generate_download_queries_instruction,
+    outer_reflect_instruction,
     plan_sub_goal_instruction,
+    reflect_download_instruction,
+    reflect_qa_instruction,
+    synthesize_pair_answer_instruction,
 )
 from State.auth_source_state import AuthReportState
 from Tools.auth_source_tools import (
     download_investanchor_report,
     download_queries_formatter,
     download_yuanta_report,
+    outer_reflect_formatter,
+    reflect_download_formatter,
+    reflect_qa_formatter,
     sub_goal_formatter,
+    synthesis_formatter,
 )
 from Utils.utils import call_llm
 
@@ -215,3 +225,152 @@ def generate_download_queries_node(state: AuthReportState) -> dict:
             "yuanta": args.get("yuanta"),
         }
     }
+
+
+# ---------------------------------------------------------------------------
+# reflect_download node
+# ---------------------------------------------------------------------------
+def reflect_download_node(state: AuthReportState) -> Command:
+    """Grade downloaded reports; route to qa_agent or retry generate_download_queries."""
+    count = state.get("download_reflection_count", 0)
+    max_count = state.get("max_download_reflections", 1)
+
+    if count >= max_count:
+        logger.warning("[reflect_download] Max retries (%d) reached, force-passing to qa_agent", max_count)
+        return Command(goto="qa_agent")
+
+    downloaded_reports = state.get("downloaded_reports", [])
+    reports_summary = (
+        "\n".join(f"- {r['name']} ({r['source']})" for r in downloaded_reports) if downloaded_reports else "None"
+    )
+    system_instruction = reflect_download_instruction.format(
+        sub_goal=state["sub_goal"],
+        reports_summary=reports_summary,
+    )
+    response = call_llm(
+        MODEL_NAME,
+        BACKUP_MODEL_NAME,
+        prompt=[
+            SystemMessage(content=system_instruction),
+            HumanMessage(content="依據以上指示執行。"),
+        ],
+        tool=[reflect_download_formatter],
+        tool_choice="required",
+    )
+    args = response.tool_calls[0]["args"]
+    grade = args.get("grade", "fail")
+    weakness = args.get("download_weakness", "")
+
+    if grade == "pass":
+        return Command(goto="qa_agent")
+    return Command(
+        update={"download_weakness": weakness, "download_reflection_count": count + 1},
+        goto="generate_download_queries",
+    )
+
+
+# ---------------------------------------------------------------------------
+# reflect_qa node
+# ---------------------------------------------------------------------------
+def reflect_qa_node(state: AuthReportState) -> Command:
+    """Grade QA answer quality; route to synthesize_pair_answer or retry qa_agent."""
+    count = state.get("qa_reflection_count", 0)
+    max_count = state.get("max_qa_reflections", 1)
+
+    if count >= max_count:
+        logger.warning("[reflect_qa] Max retries (%d) reached, force-passing to synthesize", max_count)
+        return Command(goto="synthesize_pair_answer")
+
+    curr_answer = state.get("curr_answer", "")
+    system_instruction = reflect_qa_instruction.format(
+        sub_goal=state["sub_goal"],
+        curr_answer=curr_answer or "(empty)",
+    )
+    response = call_llm(
+        MODEL_NAME,
+        BACKUP_MODEL_NAME,
+        prompt=[
+            SystemMessage(content=system_instruction),
+            HumanMessage(content="依據以上指示執行。"),
+        ],
+        tool=[reflect_qa_formatter],
+        tool_choice="required",
+    )
+    args = response.tool_calls[0]["args"]
+    grade = args.get("grade", "fail")
+    weakness = args.get("qa_weakness", "")
+
+    if grade == "pass":
+        return Command(goto="synthesize_pair_answer")
+    return Command(
+        update={"qa_weakness": weakness, "qa_reflection_count": count + 1},
+        goto="qa_agent",
+    )
+
+
+# ---------------------------------------------------------------------------
+# outer_reflect node
+# ---------------------------------------------------------------------------
+def outer_reflect_node(state: AuthReportState) -> Command:
+    """Grade whether the main question is fully answered; loop back or END."""
+    pair_count = state.get("pair_count", 0)
+    max_pairs = state.get("max_pairs", 3)
+
+    if pair_count >= max_pairs:
+        logger.info("[outer_reflect] max_pairs=%d reached, ending", max_pairs)
+        return Command(goto=END)
+
+    system_instruction = outer_reflect_instruction.format(
+        question=state["question"],
+        answer=state.get("answer", "") or "(empty)",
+    )
+    response = call_llm(
+        MODEL_NAME,
+        BACKUP_MODEL_NAME,
+        prompt=[
+            SystemMessage(content=system_instruction),
+            HumanMessage(content="依據以上指示執行。"),
+        ],
+        tool=[outer_reflect_formatter],
+        tool_choice="required",
+    )
+    args = response.tool_calls[0]["args"]
+    grade = args.get("grade", "fail")
+
+    if grade == "pass":
+        return Command(goto=END)
+    return Command(goto="plan_sub_goal")
+
+
+# ---------------------------------------------------------------------------
+# synthesize_pair_answer node
+# ---------------------------------------------------------------------------
+def synthesize_pair_answer_node(state: AuthReportState) -> dict:
+    """Merge curr_answer into the accumulated answer. Always increments pair_count."""
+    curr_answer = state.get("curr_answer", "")
+    answer = state.get("answer", "")
+    pair_count = state.get("pair_count", 0)
+
+    if not curr_answer.strip():
+        return {"pair_count": pair_count + 1}
+
+    if not answer.strip():
+        return {"answer": curr_answer, "pair_count": pair_count + 1}
+
+    system_instruction = synthesize_pair_answer_instruction.format(
+        sub_goal=state["sub_goal"],
+        curr_answer=curr_answer,
+        accumulated_answer=answer,
+    )
+    response = call_llm(
+        MODEL_NAME,
+        BACKUP_MODEL_NAME,
+        prompt=[
+            SystemMessage(content=system_instruction),
+            HumanMessage(content="依據以上指示執行。"),
+        ],
+        tool=[synthesis_formatter],
+        tool_choice="required",
+    )
+    merged = response.tool_calls[0]["args"]["merged_answer"]
+    return {"answer": merged, "pair_count": pair_count + 1}

@@ -602,3 +602,182 @@ def test_generate_download_queries_includes_weakness_in_prompt():
         generate_download_queries_node(state)
 
     assert "前次搜尋缺少季度資料" in captured["prompt"]
+
+
+# -- reflect_download --
+
+
+def test_reflect_download_pass_routes_to_qa_agent():
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import reflect_download_node
+
+    mock_resp = _make_llm_response("reflect_download_formatter", grade="pass", download_weakness="")
+    state = _base_state(downloaded_reports=[{"name": "R", "path": "/p.json", "source": "investanchor"}])
+    with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
+        cmd = reflect_download_node(state)
+
+    assert cmd.goto == "qa_agent"
+
+
+def test_reflect_download_fail_routes_to_generate_queries():
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import reflect_download_node
+
+    mock_resp = _make_llm_response("reflect_download_formatter", grade="fail", download_weakness="需要更多季度資料")
+    with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
+        cmd = reflect_download_node(_base_state())
+
+    assert cmd.goto == "generate_download_queries"
+    assert cmd.update["download_weakness"] == "需要更多季度資料"
+    assert cmd.update["download_reflection_count"] == 1
+
+
+def test_reflect_download_force_pass_at_max():
+    """When count >= max, route to qa_agent without calling LLM."""
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import reflect_download_node
+
+    state = _base_state(download_reflection_count=1, max_download_reflections=1)
+    with patch("subagent.auth_source_search.call_llm") as mock_llm:
+        cmd = reflect_download_node(state)
+
+    mock_llm.assert_not_called()
+    assert cmd.goto == "qa_agent"
+
+
+# -- reflect_qa --
+
+
+def test_reflect_qa_pass_routes_to_synthesize():
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import reflect_qa_node
+
+    mock_resp = _make_llm_response("reflect_qa_formatter", grade="pass", qa_weakness="")
+    state = _base_state(curr_answer="台積電的N3良率已達到業界水準。")
+    with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
+        cmd = reflect_qa_node(state)
+
+    assert cmd.goto == "synthesize_pair_answer"
+
+
+def test_reflect_qa_fail_routes_to_qa_agent():
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import reflect_qa_node
+
+    mock_resp = _make_llm_response("reflect_qa_formatter", grade="fail", qa_weakness="缺少具體數字")
+    with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
+        cmd = reflect_qa_node(_base_state(curr_answer=""))
+
+    assert cmd.goto == "qa_agent"
+    assert cmd.update["qa_weakness"] == "缺少具體數字"
+    assert cmd.update["qa_reflection_count"] == 1
+
+
+def test_reflect_qa_force_pass_at_max():
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import reflect_qa_node
+
+    state = _base_state(qa_reflection_count=1, max_qa_reflections=1)
+    with patch("subagent.auth_source_search.call_llm") as mock_llm:
+        cmd = reflect_qa_node(state)
+
+    mock_llm.assert_not_called()
+    assert cmd.goto == "synthesize_pair_answer"
+
+
+# -- outer_reflect --
+
+
+def test_outer_reflect_pass_routes_to_end():
+    from unittest.mock import patch
+
+    from langgraph.graph import END
+
+    from subagent.auth_source_search import outer_reflect_node
+
+    mock_resp = _make_llm_response("outer_reflect_formatter", grade="pass", hint="")
+    state = _base_state(answer="完整答案在此", pair_count=1, max_pairs=3)
+    with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
+        cmd = outer_reflect_node(state)
+
+    assert cmd.goto == END
+
+
+def test_outer_reflect_fail_routes_to_plan_sub_goal():
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import outer_reflect_node
+
+    mock_resp = _make_llm_response("outer_reflect_formatter", grade="fail", hint="需研究競爭對手")
+    state = _base_state(answer="部分答案", pair_count=1, max_pairs=3)
+    with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
+        cmd = outer_reflect_node(state)
+
+    assert cmd.goto == "plan_sub_goal"
+
+
+def test_outer_reflect_force_end_at_max_pairs():
+    from unittest.mock import patch
+
+    from langgraph.graph import END
+
+    from subagent.auth_source_search import outer_reflect_node
+
+    state = _base_state(pair_count=3, max_pairs=3)
+    with patch("subagent.auth_source_search.call_llm") as mock_llm:
+        cmd = outer_reflect_node(state)
+
+    mock_llm.assert_not_called()
+    assert cmd.goto == END
+
+
+# -- synthesize_pair_answer --
+
+
+def test_synthesize_pair_answer_merge():
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import synthesize_pair_answer_node
+
+    mock_resp = _make_llm_response("synthesis_formatter", merged_answer="合併後的答案")
+    state = _base_state(curr_answer="新發現", answer="舊答案", pair_count=0)
+    with patch("subagent.auth_source_search.call_llm", return_value=mock_resp):
+        result = synthesize_pair_answer_node(state)
+
+    assert result["answer"] == "合併後的答案"
+    assert result["pair_count"] == 1
+
+
+def test_synthesize_pair_answer_empty_curr_skips_llm():
+    """Empty curr_answer -> skip LLM merge, just increment pair_count."""
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import synthesize_pair_answer_node
+
+    state = _base_state(curr_answer="", answer="舊答案", pair_count=2)
+    with patch("subagent.auth_source_search.call_llm") as mock_llm:
+        result = synthesize_pair_answer_node(state)
+
+    mock_llm.assert_not_called()
+    assert result["pair_count"] == 3
+
+
+def test_synthesize_pair_answer_first_pair_no_merge():
+    """First pair with empty accumulated answer: use curr_answer directly without LLM."""
+    from unittest.mock import patch
+
+    from subagent.auth_source_search import synthesize_pair_answer_node
+
+    state = _base_state(curr_answer="第一個答案", answer="", pair_count=0)
+    with patch("subagent.auth_source_search.call_llm") as mock_llm:
+        result = synthesize_pair_answer_node(state)
+
+    mock_llm.assert_not_called()
+    assert result["answer"] == "第一個答案"
+    assert result["pair_count"] == 1
