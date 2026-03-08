@@ -894,6 +894,31 @@ def test_qa_agent_selection_fallback_on_empty_llm():
     assert result["selected_reports"] == reports
 
 
+def test_qa_agent_selection_fallback_on_llm_error():
+    """If _select_documents LLM call raises, fall back to all documents."""
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from subagent.auth_source_search import qa_agent_node
+
+    reports = [
+        {"name": "ReportA", "path": "/a.json", "source": "investanchor"},
+        {"name": "ReportB", "path": "/b.json", "source": "yuanta"},
+    ]
+    fake_graph = MagicMock()
+    fake_graph.invoke.return_value = {"answer": "答案"}
+    config = {"configurable": {"shared_navigator": _make_nav()}}
+
+    with (
+        patch("subagent.auth_source_search.call_llm", side_effect=RuntimeError("LLM unavailable")),
+        patch("subagent.auth_source_search.build_document_qa_graph", return_value=fake_graph),
+    ):
+        result = asyncio.run(qa_agent_node(_base_state(downloaded_reports=reports), config))
+
+    assert result["selected_reports"] == reports
+    assert result["curr_answer"] == "答案"
+
+
 def test_qa_agent_sanitizes_sentinel_answer():
     """Document QA sentinel output is sanitised to empty string."""
     import asyncio
