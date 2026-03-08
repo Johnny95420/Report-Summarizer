@@ -14,11 +14,13 @@ import logging
 import os
 import pathlib
 import re
+import shutil
+import uuid
 
 import omegaconf
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph import END
+from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 
 from Prompt.auth_source_prompt import (
@@ -493,3 +495,120 @@ async def qa_agent_node(state: AuthReportState, config: RunnableConfig) -> dict:
 
     sanitized = _sanitize_qa_answer(raw_answer)
     return {"curr_answer": sanitized, "selected_reports": selected_reports}
+
+
+# ---------------------------------------------------------------------------
+# Graph builder
+# ---------------------------------------------------------------------------
+def build_auth_source_graph():
+    """Build and compile the auth source search StateGraph."""
+    graph = StateGraph(AuthReportState)
+
+    graph.add_node("plan_sub_goal", plan_sub_goal_node)
+    graph.add_node("generate_download_queries", generate_download_queries_node)
+    graph.add_node("execute_downloads", execute_downloads_node)
+    graph.add_node("reflect_download", reflect_download_node)
+    graph.add_node("qa_agent", qa_agent_node)
+    graph.add_node("reflect_qa", reflect_qa_node)
+    graph.add_node("synthesize_pair_answer", synthesize_pair_answer_node)
+    graph.add_node("outer_reflect", outer_reflect_node)
+
+    graph.set_entry_point("plan_sub_goal")
+    graph.add_edge("plan_sub_goal", "generate_download_queries")
+    graph.add_edge("generate_download_queries", "execute_downloads")
+    graph.add_edge("execute_downloads", "reflect_download")
+    # reflect_download → qa_agent | generate_download_queries  (via Command)
+    graph.add_edge("qa_agent", "reflect_qa")
+    # reflect_qa → synthesize_pair_answer | qa_agent  (via Command)
+    graph.add_edge("synthesize_pair_answer", "outer_reflect")
+    # outer_reflect → END | plan_sub_goal  (via Command)
+
+    return graph.compile()
+
+
+# Module-level singleton compiled once at import
+auth_source_graph = build_auth_source_graph()
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+async def run_auth_source_search(
+    question: str,
+    max_pairs: int = 3,
+    max_download_reflections: int = 1,
+    max_qa_reflections: int = 1,
+    qa_budget: int = 30,
+    converter=None,
+    keep_run_dir: bool = False,
+) -> str:
+    """Run auth source search and return the answer string.
+
+    Creates a fresh AgentDocumentReader, runs the compiled auth_source_graph
+    in a thread (navigator is sync), cleans up the per-run dir on completion.
+
+    Args:
+        question: Research question to answer.
+        max_pairs: Maximum [download, QA] rounds.
+        max_download_reflections: Max reflect-and-retry cycles per download phase.
+        max_qa_reflections: Max reflect-and-retry cycles per QA phase.
+        qa_budget: Document QA iteration budget per qa_agent call.
+        converter: Pre-built PdfConverter instance (shared GPU model).
+        keep_run_dir: If True, keep the per-run directory after completion.
+
+    Returns:
+        Answer string in Traditional Chinese, or sentinel string if nothing found.
+    """
+    from Tools.text_navigator import AgentDocumentReader
+
+    reader_tmp_dir = _READER_TMP_DIR
+    os.makedirs(reader_tmp_dir, exist_ok=True)
+
+    navigator = AgentDocumentReader()
+    nav_state_path = os.path.join(reader_tmp_dir, f"auth_nav_{uuid.uuid4().hex}.json")
+
+    # Per-run work directory (symlinks to global cache)
+    run_dir = os.path.join(reader_tmp_dir, f"auth_run_{uuid.uuid4().hex}")
+    os.makedirs(run_dir, exist_ok=True)
+
+    initial_state: dict = {
+        "question": question,
+        "max_pairs": max_pairs,
+        "max_download_reflections": max_download_reflections,
+        "max_qa_reflections": max_qa_reflections,
+        "qa_budget": qa_budget,
+        "sub_goal": "",
+        "sub_goal_history": [],
+        "download_queries": {},
+        "download_weakness": "",
+        "download_reflection_count": 0,
+        "downloaded_reports": [],
+        "selected_reports": [],
+        "curr_answer": "",
+        "qa_weakness": "",
+        "qa_reflection_count": 0,
+        "navigator_state_path": nav_state_path,
+        "answer": "",
+        "pair_count": 0,
+    }
+    invoke_config = {
+        "configurable": {
+            "shared_navigator": navigator,
+            "shared_pdf_converter": converter,
+            "run_dir": run_dir,
+        }
+    }
+
+    try:
+        result = await auth_source_graph.ainvoke(initial_state, invoke_config)
+    finally:
+        navigator.close_document()
+        if not keep_run_dir:
+            shutil.rmtree(run_dir, ignore_errors=True)
+        if os.path.exists(nav_state_path):
+            os.remove(nav_state_path)
+
+    answer = result.get("answer", "")
+    if not answer or not answer.strip():
+        return _NO_ANSWER_SENTINEL
+    return answer

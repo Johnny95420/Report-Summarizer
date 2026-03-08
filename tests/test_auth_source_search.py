@@ -937,3 +937,20 @@ def test_qa_agent_exception_returns_empty():
 
     assert result["curr_answer"] == ""
     assert "selected_reports" in result
+
+
+def test_build_auth_source_graph_has_all_nodes():
+    from subagent.auth_source_search import build_auth_source_graph
+
+    graph = build_auth_source_graph()
+    expected = {
+        "plan_sub_goal",
+        "generate_download_queries",
+        "execute_downloads",
+        "reflect_download",
+        "qa_agent",
+        "reflect_qa",
+        "synthesize_pair_answer",
+        "outer_reflect",
+    }
+    assert expected.issubset(set(graph.nodes.keys()))
