@@ -59,7 +59,7 @@ from State.state import (
     SectionState,
 )
 from subagent.agentic_search import agentic_search_graph
-from subagent.auth_source_search import run_auth_source_search
+from subagent.auth_source_search import _NO_ANSWER_SENTINEL, run_auth_source_search
 from Tools.tools import (
     content_refinement_formatter,
     feedback_formatter,
@@ -419,7 +419,7 @@ async def orchestration(state: SectionState, config: RunnableConfig):
         new_source_block += local_str
 
     # ── Launch async sub-agents concurrently ──────────────────────────────
-    async_tasks: dict[str, asyncio.Task] = {}
+    async_coros: dict[str, asyncio.coroutines] = {}
 
     if use_web:
         agentic_search_iterations = configurable.get("agentic_search_iterations", 1)
@@ -437,10 +437,10 @@ async def orchestration(state: SectionState, config: RunnableConfig):
             )
             return search_results.get("answer", "")
 
-        async_tasks["web"] = asyncio.create_task(_do_web())
+        async_coros["web"] = _do_web()
 
     if use_auth:
-        shared_converter = configurable.get("shared_pdf_converter")  # REVISION S1
+        shared_converter = configurable.get("shared_pdf_converter")
         auth_max_pairs = configurable.get("auth_max_pairs", 3)
         auth_max_download_reflections = configurable.get("auth_max_download_reflections", 1)
         auth_max_qa_reflections = configurable.get("auth_max_qa_reflections", 1)
@@ -453,14 +453,15 @@ async def orchestration(state: SectionState, config: RunnableConfig):
                 max_download_reflections=auth_max_download_reflections,
                 max_qa_reflections=auth_max_qa_reflections,
                 qa_budget=auth_qa_budget,
-                converter=shared_converter,  # REVISION S1
+                converter=shared_converter,
             )
 
-        async_tasks["auth"] = asyncio.create_task(_do_auth())
+        async_coros["auth"] = _do_auth()
 
-    if async_tasks:
-        results_list = await asyncio.gather(*async_tasks.values(), return_exceptions=True)
-        result_map = dict(zip(async_tasks.keys(), results_list))
+    if async_coros:
+        keys = list(async_coros.keys())
+        results_list = await asyncio.gather(*async_coros.values(), return_exceptions=True)
+        result_map = dict(zip(keys, results_list))
 
         blocks = []
 
@@ -476,7 +477,7 @@ async def orchestration(state: SectionState, config: RunnableConfig):
         if "auth" in result_map:
             auth_answer = result_map["auth"] if not isinstance(result_map["auth"], Exception) else ""
             # Suppress the sentinel string — treat it as "no useful content"
-            if auth_answer and "[auth_source_search:" not in auth_answer:
+            if auth_answer and auth_answer != _NO_ANSWER_SENTINEL:
                 blocks.append(
                     f"## Research Iteration {iteration_num}\n"
                     f"**Question:**\n{current_question.question}\n\n"
