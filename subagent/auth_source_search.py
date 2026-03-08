@@ -545,7 +545,7 @@ async def run_auth_source_search(
     """Run auth source search and return the answer string.
 
     Creates a fresh AgentDocumentReader, runs the compiled auth_source_graph
-    in a thread (navigator is sync), cleans up the per-run dir on completion.
+    via ainvoke (qa_agent_node is async), cleans up the per-run dir on completion.
 
     Args:
         question: Research question to answer.

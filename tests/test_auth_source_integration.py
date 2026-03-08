@@ -2,8 +2,8 @@
 """Integration tests for the auth_source_search LangGraph graph.
 
 All LLM calls and API calls are mocked — no external services required.
-Tests run the full graph synchronously via asyncio.run(asyncio.to_thread(...))
-using the same path that run_auth_source_search uses.
+Tests run the full graph via asyncio.run(graph.ainvoke(...))
+using the same execution model that run_auth_source_search uses.
 """
 
 import asyncio
@@ -218,3 +218,27 @@ class TestAuthSourceGraphIntegration:
             qa_answer="",
         )
         assert "answer" in result
+
+
+@pytest.mark.integration
+class TestRunAuthSourceSearchCleanup:
+    def test_run_dir_cleaned_up_on_error(self, tmp_path):
+        """run_auth_source_search removes per-run dir even when ainvoke raises."""
+        from unittest.mock import AsyncMock
+
+        import subagent.auth_source_search as asc
+        from subagent.auth_source_search import run_auth_source_search
+
+        with (
+            patch.object(asc, "auth_source_graph") as mock_graph,
+            patch("subagent.auth_source_search._READER_TMP_DIR", str(tmp_path)),
+            patch("Tools.text_navigator.AgentDocumentReader") as mock_reader_cls,
+        ):
+            mock_reader_cls.return_value = MagicMock()
+            mock_graph.ainvoke = AsyncMock(side_effect=RuntimeError("graph failed"))
+            with pytest.raises(RuntimeError, match="graph failed"):
+                asyncio.run(run_auth_source_search("test question"))
+
+        # Per-run dirs should have been cleaned up
+        remaining = list(tmp_path.glob("auth_run_*"))
+        assert remaining == [], f"Stale run dirs not cleaned: {remaining}"
